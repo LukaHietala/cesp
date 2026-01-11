@@ -47,3 +47,11 @@ void *xmalloc(size_t size)
 		die("Out of memory (malloc failed for %zu bytes)\n", size);
 	return ptr;
 }
+
+void *xrealloc(void *ptr, size_t size)
+{
+	void *new_ptr = realloc(ptr, size);
+	if (new_ptr == NULL && size > 0)
+		die("Out of memory (realloc failed for %zu bytes)\n", size);
+	return new_ptr;
+}

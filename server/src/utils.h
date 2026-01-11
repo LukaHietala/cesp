@@ -6,6 +6,7 @@
 
 void die(const char *err, ...);
 void *xmalloc(size_t size);
+void *xrealloc(void *ptr, size_t size);
 cJSON *parse_json(const char *base, ssize_t nread);
 
 #endif
