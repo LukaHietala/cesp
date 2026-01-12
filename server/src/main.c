@@ -24,7 +24,7 @@ typedef struct client_node {
 	struct client_node *prev;
 } client_node_t;
 
-/* Latest client */
+/* First client */
 client_node_t *clients_head = NULL;
 
 /* Adds client to tracked clients */
@@ -103,6 +103,16 @@ void echo_write(uv_write_t *req, int status)
 	free_write_req(req);
 }
 
+/* Sends message to spesified stream */
+void send_message(uv_stream_t *dest, const char *msg)
+{
+	write_req_t *req = (write_req_t *)xmalloc(sizeof(write_req_t));
+	char *msg_copy = strdup(msg);
+
+	req->buf = uv_buf_init(msg_copy, strlen(msg_copy));
+	uv_write((uv_write_t *)req, dest, &req->buf, 1, echo_write);
+}
+
 /* Sends message to every client other than the sender. Message has to end with
  * newline */
 void broadcast_message(uv_stream_t *sender, const char *msg)
@@ -112,15 +122,8 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 	while (iter) {
 		uv_stream_t *dest = iter->client;
 
-		if (dest != sender) {
-			write_req_t *req =
-				(write_req_t *)xmalloc(sizeof(write_req_t));
-
-			char *msg_copy = strdup(msg);
-			req->buf = uv_buf_init(msg_copy, strlen(msg_copy));
-			uv_write((uv_write_t *)req, dest, &req->buf, 1,
-				 echo_write);
-		}
+		if (dest != sender)
+			send_message(iter->client, msg);
 
 		iter = iter->next;
 	}
@@ -128,30 +131,51 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 
 void echo_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 {
-	if (nread > 0) {
-		cJSON *data_json = parse_json(buf->base, nread);
-
-		if (data_json == NULL) {
-			free(buf->base);
-			return;
-		}
-
-		char *data_json_str = stringify_json(data_json);
-
-		broadcast_message(client, data_json_str);
-
-		free(data_json_str);
-		cJSON_Delete(data_json);
-		free(buf->base);
-		return;
-	}
-
 	if (nread < 0) {
 		if (nread != UV_EOF)
 			fprintf(stderr, "Read error %s\n", uv_err_name(nread));
 		uv_close((uv_handle_t *)client, on_close);
+		free(buf->base);
+		return;
 	}
 
+	cJSON *data_json = parse_json(buf->base, nread);
+
+	if (data_json == NULL) {
+		free(buf->base);
+		return;
+	}
+
+	cJSON *to_host_item =
+		cJSON_GetObjectItemCaseSensitive(data_json, "to_host");
+	int is_direct_to_host =
+		cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item);
+
+	char *data_json_str = stringify_json(data_json);
+
+	if (is_direct_to_host) {
+		client_node_t *iter = clients_head;
+		uv_stream_t *host_client = NULL;
+
+		while (iter) {
+			if (iter->is_host) {
+				host_client = iter->client;
+				break;
+			}
+			iter = iter->next;
+		}
+
+		if (host_client)
+			send_message(host_client, data_json_str);
+
+		const char *reply = "{\"koira_sanoo\": \"nouda\"}\n";
+		send_message(client, reply);
+	} else {
+		broadcast_message(client, data_json_str);
+	}
+
+	free(data_json_str);
+	cJSON_Delete(data_json);
 	free(buf->base);
 }
 
