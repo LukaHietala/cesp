@@ -7,6 +7,7 @@
 
 #define DEFAULT_PORT	8080
 #define DEFAULT_BACKLOG 128
+#define DEFAULT_TIMEOUT 5000 /* ms */
 
 uv_loop_t *loop;
 struct sockaddr_in addr;
@@ -26,9 +27,19 @@ typedef struct client_node {
 } client_node_t;
 
 int next_client_id = 0;
-
-/* First client */
 client_node_t *clients_head = NULL;
+
+/* Pending requests */
+typedef struct pending_request {
+	int request_id;
+	int client_id;
+	uv_timer_t *timer;
+	struct pending_request *next;
+	struct pending_request *prev;
+} pending_request_t;
+
+int next_request_id = 0;
+pending_request_t *requests_head = NULL;
 
 /* Returns client's uv_stream by id */
 uv_stream_t *find_client_stream_by_id(int id)
@@ -93,6 +104,58 @@ void remove_client(uv_stream_t *client)
 	client->data = NULL;
 }
 
+/* Add request to the tracking list */
+void add_pending_request(pending_request_t *req)
+{
+	req->next = requests_head;
+	req->prev = NULL;
+
+	if (requests_head)
+		requests_head->prev = req;
+
+	requests_head = req;
+}
+
+/* Callback, on timer closes free the pending request */
+void on_timer_close(uv_handle_t *handle)
+{
+	pending_request_t *req = (pending_request_t *)handle->data;
+
+	if (req)
+		free(req);
+
+	free(handle);
+}
+
+/* Unlink request from list (does not free memory) */
+void unlink_pending_request(pending_request_t *req)
+{
+	if (req->prev)
+		req->prev->next = req->next;
+	else
+		requests_head = req->next;
+
+	if (req->next)
+		req->next->prev = req->prev;
+}
+
+/* Find and remove a request by request id (stops timer and frees) */
+void complete_request(int request_id)
+{
+	pending_request_t *iter = requests_head;
+	while (iter) {
+		if (iter->request_id == request_id) {
+			unlink_pending_request(iter);
+
+			uv_timer_stop(iter->timer);
+
+			uv_close((uv_handle_t *)iter->timer, on_timer_close);
+			return;
+		}
+		iter = iter->next;
+	}
+}
+
 void free_write_req(uv_write_t *req)
 {
 	write_req_t *wr = (write_req_t *)req;
@@ -145,6 +208,24 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 	}
 }
 
+/* Notifies client on request timeout */
+void on_request_timeout(uv_timer_t *handle)
+{
+	pending_request_t *req_data = (pending_request_t *)handle->data;
+
+	uv_stream_t *client = find_client_stream_by_id(req_data->client_id);
+	if (client) {
+		const char *error_msg =
+			"{\"event\": \"error\", \"data\": "
+			"{\"message\": \"Timeout! Host is too "
+			"incompetent to handle this request)\"}}\n";
+		send_message(client, error_msg);
+	}
+
+	unlink_pending_request(req_data);
+	uv_close((uv_handle_t *)handle, on_timer_close);
+}
+
 void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 {
 	if (nread < 0) {
@@ -174,6 +255,25 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 	 * later to send reply to the client that made the request in the first
 	 * place. This is for request events */
 	if (cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item)) {
+		/* Create a request */
+		int req_id = next_request_id++;
+
+		pending_request_t *req_context =
+			xmalloc(sizeof(pending_request_t));
+		req_context->request_id = req_id;
+		req_context->client_id = sender_node->id;
+
+		/* Setup libuv timer for timeouts */
+		uv_timer_t *timer = xmalloc(sizeof(uv_timer_t));
+		uv_timer_init(loop, timer);
+		timer->data = req_context;
+		req_context->timer = timer;
+
+		uv_timer_start(timer, on_request_timeout, DEFAULT_TIMEOUT, 0);
+
+		add_pending_request(req_context);
+
+		cJSON_AddNumberToObject(data_json, "request_id", req_id);
 		cJSON_AddNumberToObject(data_json, "from_id", sender_node->id);
 		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_host");
 
@@ -193,6 +293,13 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 	/* If the message is a host's response to client, foward it to that
 	   client based on 'to_client' field. This is for response events */
 	else if (cJSON_IsNumber(to_client_item)) {
+		/* Complete the request (remove from pending requests and stop
+		 * timeout timers) */
+		cJSON *req_id_item = cJSON_GetObjectItemCaseSensitive(
+			data_json, "request_id");
+		if (cJSON_IsNumber(req_id_item))
+			complete_request(req_id_item->valueint);
+
 		int client_id = to_client_item->valueint;
 		uv_stream_t *dest = find_client_stream_by_id(client_id);
 
