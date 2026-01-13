@@ -42,6 +42,27 @@ typedef struct pending_request {
 int next_request_id = 0;
 pending_request_t *requests_head = NULL;
 
+/* Foward defs, TODO: move to headers */
+void free_write_req(uv_write_t *req);
+void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
+
+void add_pending_request(pending_request_t *req);
+void unlink_pending_request(pending_request_t *req);
+void complete_request(int request_id);
+void add_client(uv_stream_t *client);
+void remove_client(uv_stream_t *client);
+uv_stream_t *find_client_stream_by_id(int id);
+
+void send_message(uv_stream_t *dest, const char *msg);
+void broadcast_message(uv_stream_t *sender, const char *msg);
+
+void on_timer_close(uv_handle_t *handle);
+void on_close(uv_handle_t *handle);
+void on_write_ready(uv_write_t *req, int status);
+void on_request_timeout(uv_timer_t *handle);
+void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf);
+void on_new_connection(uv_stream_t *server, int status);
+
 /* Add request to the tracking list */
 void add_pending_request(pending_request_t *req)
 {
@@ -153,11 +174,16 @@ void remove_client(uv_stream_t *client)
 		iter = next;
 	}
 
+	client_node_t *new_host = NULL;
+
 	if (node->is_host) {
-		if (node->next)
+		if (node->next) {
 			node->next->is_host = 1;
-		else if (node->prev)
+			new_host = node->next;
+		} else if (node->prev) {
 			node->prev->is_host = 1;
+			new_host = node->prev;
+		}
 	}
 
 	if (node->prev)
@@ -167,6 +193,15 @@ void remove_client(uv_stream_t *client)
 
 	if (node->next)
 		node->next->prev = node->prev;
+
+	if (node->is_host && new_host) {
+		char msg[128];
+		snprintf(msg, sizeof(msg),
+			 "{\"event\":\"new_host\",\"name\":\"%s\"}\n",
+			 new_host->name);
+
+		broadcast_message(NULL, msg);
+	}
 
 	if (node->name)
 		free(node->name);
@@ -203,6 +238,24 @@ void on_write_ready(uv_write_t *req, int status)
 	free_write_req(req);
 }
 
+/* Notifies client on request timeout */
+void on_request_timeout(uv_timer_t *handle)
+{
+	pending_request_t *req_data = (pending_request_t *)handle->data;
+
+	uv_stream_t *client = find_client_stream_by_id(req_data->client_id);
+	if (client) {
+		const char *error_msg =
+			"{\"event\": \"error\", \"data\": "
+			"{\"message\": \"Timeout! Host is too "
+			"incompetent to handle this request on time\"}}\n";
+		send_message(client, error_msg);
+	}
+
+	unlink_pending_request(req_data);
+	uv_close((uv_handle_t *)handle, on_timer_close);
+}
+
 /* Sends message to spesified stream */
 void send_message(uv_stream_t *dest, const char *msg)
 {
@@ -222,29 +275,13 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 	while (iter) {
 		uv_stream_t *dest = iter->client;
 
-		if (dest != sender)
+		/* If no sender (server broadcast) send to everyone, if sender
+		 * send to everyone except the sender */
+		if (sender == NULL || dest != sender)
 			send_message(iter->client, msg);
 
 		iter = iter->next;
 	}
-}
-
-/* Notifies client on request timeout */
-void on_request_timeout(uv_timer_t *handle)
-{
-	pending_request_t *req_data = (pending_request_t *)handle->data;
-
-	uv_stream_t *client = find_client_stream_by_id(req_data->client_id);
-	if (client) {
-		const char *error_msg =
-			"{\"event\": \"error\", \"data\": "
-			"{\"message\": \"Timeout! Host is too "
-			"incompetent to handle this request on time\"}}\n";
-		send_message(client, error_msg);
-	}
-
-	unlink_pending_request(req_data);
-	uv_close((uv_handle_t *)handle, on_timer_close);
 }
 
 void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
