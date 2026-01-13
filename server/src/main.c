@@ -22,6 +22,7 @@ typedef struct client_node {
 	uv_stream_t *client;
 	int id;
 	int is_host;
+	char *name;
 	struct client_node *next;
 	struct client_node *prev;
 } client_node_t;
@@ -112,6 +113,7 @@ void add_client(uv_stream_t *client)
 
 	node->client = client;
 	node->id = next_client_id++;
+	node->name = strdup("Jaakko");
 	node->next = clients_head;
 	node->prev = NULL;
 
@@ -166,6 +168,8 @@ void remove_client(uv_stream_t *client)
 	if (node->next)
 		node->next->prev = node->prev;
 
+	if (node->name)
+		free(node->name);
 	free(node);
 
 	/* Make sure that pointer to this node doesn't linger in client stream
@@ -266,6 +270,19 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		cJSON_GetObjectItemCaseSensitive(data_json, "to_host");
 	cJSON *to_client_item =
 		cJSON_GetObjectItemCaseSensitive(data_json, "to_client");
+	cJSON *set_name_item =
+		cJSON_GetObjectItemCaseSensitive(data_json, "set_name");
+
+	/* If message has 'set_name' field, set that client's name to it and
+	 * don't do anything else */
+	if (cJSON_IsString(set_name_item) &&
+	    (set_name_item->valuestring != NULL)) {
+		if (sender_node->name)
+			free(sender_node->name);
+
+		sender_node->name = strdup(set_name_item->valuestring);
+		goto cleanup;
+	}
 
 	/* If message has 'to_host' field set to true send the request to host
 	 * with 'from_id' that identifies sender. 'from_id' is used by the host
@@ -306,6 +323,7 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		}
 
 		free(request_str);
+		goto cleanup;
 	}
 	/* If the message is a host's response to client, foward it to that
 	   client based on 'to_client' field. This is for response events */
@@ -327,6 +345,8 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 			send_message(dest, response_str);
 			free(response_str);
 		}
+
+		goto cleanup;
 	}
 	/* If no 'to_client' or 'to_host' fields, broadcast to everyne. This for
 	   broadcast events */
@@ -334,8 +354,11 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		char *broadcast_str = stringify_json(data_json);
 		broadcast_message(client, broadcast_str);
 		free(broadcast_str);
+
+		goto cleanup;
 	}
 
+cleanup:
 	cJSON_Delete(data_json);
 	free(buf->base);
 }
