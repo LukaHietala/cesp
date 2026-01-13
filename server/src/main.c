@@ -19,13 +19,28 @@ typedef struct {
 /* Connected clients */
 typedef struct client_node {
 	uv_stream_t *client;
+	int id;
 	int is_host;
 	struct client_node *next;
 	struct client_node *prev;
 } client_node_t;
 
+int next_client_id = 0;
+
 /* First client */
 client_node_t *clients_head = NULL;
+
+/* Returns client's uv_stream by id */
+uv_stream_t *find_client_stream_by_id(int id)
+{
+	client_node_t *iter = clients_head;
+	while (iter) {
+		if (iter->id == id)
+			return iter->client;
+		iter = iter->next;
+	}
+	return NULL;
+}
 
 /* Adds client to tracked clients */
 void add_client(uv_stream_t *client)
@@ -33,6 +48,7 @@ void add_client(uv_stream_t *client)
 	client_node_t *node = (client_node_t *)xmalloc(sizeof(client_node_t));
 
 	node->client = client;
+	node->id = next_client_id++;
 	node->next = clients_head;
 	node->prev = NULL;
 
@@ -146,35 +162,56 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		return;
 	}
 
+	client_node_t *sender_node = (client_node_t *)client->data;
+
 	cJSON *to_host_item =
 		cJSON_GetObjectItemCaseSensitive(data_json, "to_host");
-	int is_direct_to_host =
-		cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item);
+	cJSON *to_client_item =
+		cJSON_GetObjectItemCaseSensitive(data_json, "to_client");
 
-	char *data_json_str = stringify_json(data_json);
+	/* If message has 'to_host' field set to true send the request to host
+	 * with 'from_id' that identifies sender. 'from_id' is used by the host
+	 * later to send reply to the client that made the request in the first
+	 * place. This is for request events */
+	if (cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item)) {
+		cJSON_AddNumberToObject(data_json, "from_id", sender_node->id);
+		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_host");
 
-	if (is_direct_to_host) {
+		char *request_str = stringify_json(data_json);
+
 		client_node_t *iter = clients_head;
-		uv_stream_t *host_client = NULL;
-
 		while (iter) {
 			if (iter->is_host) {
-				host_client = iter->client;
+				send_message(iter->client, request_str);
 				break;
 			}
 			iter = iter->next;
 		}
 
-		if (host_client)
-			send_message(host_client, data_json_str);
+		free(request_str);
+	}
+	/* If the message is a host's response to client, foward it to that
+	   client based on 'to_client' field. This is for response events */
+	else if (cJSON_IsNumber(to_client_item)) {
+		int client_id = to_client_item->valueint;
+		uv_stream_t *dest = find_client_stream_by_id(client_id);
 
-		const char *reply = "{\"koira_sanoo\": \"nouda\"}\n";
-		send_message(client, reply);
-	} else {
-		broadcast_message(client, data_json_str);
+		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_client");
+
+		char *response_str = stringify_json(data_json);
+		if (dest) {
+			send_message(dest, response_str);
+			free(response_str);
+		}
+	}
+	/* If no 'to_client' or 'to_host' fields, broadcast to everyne. This for
+	   broadcast events */
+	else {
+		char *broadcast_str = stringify_json(data_json);
+		broadcast_message(client, broadcast_str);
+		free(broadcast_str);
 	}
 
-	free(data_json_str);
 	cJSON_Delete(data_json);
 	free(buf->base);
 }
