@@ -151,8 +151,12 @@ void remove_client(uv_stream_t *client)
 		iter = next;
 	}
 
-	if (node->is_host && node->prev != NULL)
-		node->prev->is_host = 1;
+	if (node->is_host) {
+		if (node->next)
+			node->next->is_host = 1;
+		else if (node->prev)
+			node->prev->is_host = 1;
+	}
 
 	if (node->prev)
 		node->prev->next = node->next;
