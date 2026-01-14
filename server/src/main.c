@@ -8,6 +8,9 @@
 #define DEFAULT_PORT	8080
 #define DEFAULT_BACKLOG 128
 #define DEFAULT_TIMEOUT 5000 /* ms */
+#define MAX_BUFFER_SIZE \
+	(10 * 1024 *    \
+	 1024) /* 10 MB, should be enough for any text file. If not,...???*/
 
 uv_loop_t *loop;
 struct sockaddr_in addr;
@@ -489,9 +492,23 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 	}
 
 	if (nread > 0) {
+		/* Make sure that the buffer size doesn't get too large. If
+		 * client tries to hog more that 10MB memory kick it out */
+		if (node->rb_len + nread > MAX_BUFFER_SIZE) {
+			fprintf(stderr,
+				"[error] Client %d sent too much data (%zu "
+				"bytes). Sending couple petabytes to "
+				"retaliate\n",
+				node->id, node->rb_len + nread);
+
+			uv_close((uv_handle_t *)client, on_close);
+
+			if (buf->base)
+				free(buf->base);
+			return;
+		}
 		/* Check the capacity and if not enough allocate more memory to
-		 * it. TODO!: Add limits (client can consume server's entire
-		 * memory now) */
+		 * it */
 		while (node->rb_len + nread > node->rb_capacity) {
 			size_t new_capacity = node->rb_capacity * 2;
 			/* Not using xrealloc here, because usually the sizes
