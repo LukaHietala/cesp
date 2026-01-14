@@ -20,11 +20,8 @@ cJSON *parse_json(const char *base, ssize_t nread)
 
 	cJSON *json = cJSON_Parse(data);
 
-	if (json == NULL) {
-		const char *err = cJSON_GetErrorPtr();
-		if (err != NULL)
-			fprintf(stderr, "Failed to parse json: %s\n", err);
-	}
+	if (json == NULL)
+		return NULL;
 
 	free(data);
 	return json;
