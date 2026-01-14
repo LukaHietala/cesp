@@ -23,6 +23,12 @@ typedef struct client_node {
 	int id;
 	int is_host;
 	char *name;
+
+	/* Read buffers */
+	char *rb;
+	size_t rb_len;
+	size_t rb_capacity;
+
 	struct client_node *next;
 	struct client_node *prev;
 } client_node_t;
@@ -138,6 +144,11 @@ void add_client(uv_stream_t *client)
 	node->next = clients_head;
 	node->prev = NULL;
 
+	/* Read buffers, start with 1KB and go on from there */
+	node->rb_capacity = 1024;
+	node->rb = (char *)xmalloc(node->rb_capacity);
+	node->rb_len = 0;
+
 	if (clients_head == NULL) {
 		node->is_host = 1;
 	} else {
@@ -219,12 +230,17 @@ void remove_client(uv_stream_t *client)
 
 	if (node->is_host && new_host) {
 		char msg[128];
+		/* TODO: Limit name size and make sure that this doesn't
+		 * overflow */
 		snprintf(msg, sizeof(msg),
 			 "{\"event\":\"new_host\",\"name\":\"%s\"}\n",
 			 new_host->name);
 
 		broadcast_message(NULL, msg);
 	}
+
+	if (node->rb)
+		free(node->rb);
 
 	if (node->name)
 		free(node->name);
@@ -336,27 +352,18 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 	}
 }
 
-void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
+/* Processes every full message ending with newline */
+void process_message(uv_stream_t *client, const char *msg_str, size_t len)
 {
-	if (nread < 0) {
-		if (nread != UV_EOF)
-			fprintf(stderr, "[error] Read error %s\n",
-				uv_err_name(nread));
-		uv_close((uv_handle_t *)client, on_close);
-		free(buf->base);
-		return;
-	}
-
-	printf("[info] Received %ld bytes: %.*s", nread, (int)nread, buf->base);
-
-	cJSON *data_json = parse_json(buf->base, nread);
-
+	/* Parse json message */
+	cJSON *data_json = cJSON_Parse(msg_str);
 	if (data_json == NULL) {
-		fprintf(stderr, "[error] Failed to parse json: %s", buf->base);
-		free(buf->base);
+		fprintf(stderr, "[error] Failed to parse json: %s\n", msg_str);
 		return;
 	}
 
+	/* Get the sender from client stream, if for example we need to identify
+	 * it for commands like 'set_name' */
 	client_node_t *sender_node = (client_node_t *)client->data;
 
 	cJSON *to_host_item =
@@ -369,12 +376,14 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 	/* If message has 'set_name' field, set that client's name to it and
 	 * don't do anything else */
 	if (cJSON_IsString(set_name_item) &&
-	    (set_name_item->valuestring != NULL)) {
+	    set_name_item->valuestring != NULL) {
+		/* If sender already has a name override it */
 		if (sender_node->name)
 			free(sender_node->name);
-
 		sender_node->name = strdup(set_name_item->valuestring);
 
+		/* Create response to broadcast, TODO: craft spesific success
+		 * message to client that actually changed the name */
 		cJSON *event_json = cJSON_CreateObject();
 		cJSON_AddStringToObject(event_json, "event", "name_changed");
 		cJSON_AddNumberToObject(event_json, "id", sender_node->id);
@@ -386,38 +395,39 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 
 		cJSON_Delete(event_json);
 		free(event_str);
-		goto cleanup;
 	}
-
 	/* If message has 'to_host' field set to true send the request to host
 	 * with 'from_id' that identifies sender. 'from_id' is used by the host
 	 * later to send reply to the client that made the request in the first
 	 * place. This is for request events */
-	if (cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item)) {
-		/* Create a request */
+	else if (cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item)) {
 		int req_id = next_request_id++;
 
+		/* Creates a pending request */
 		pending_request_t *req_context =
 			xmalloc(sizeof(pending_request_t));
 		req_context->request_id = req_id;
 		req_context->client_id = sender_node->id;
 
-		/* Setup libuv timer for timeouts */
+		/* Adds timer to that pending request, will be deleted if result
+		 * is on time */
 		uv_timer_t *timer = xmalloc(sizeof(uv_timer_t));
 		uv_timer_init(loop, timer);
 		timer->data = req_context;
 		req_context->timer = timer;
 
 		uv_timer_start(timer, on_request_timeout, DEFAULT_TIMEOUT, 0);
-
 		add_pending_request(req_context);
 
+		/* Add more metadata to give to host, so it can use it to route
+		 * the info to right place and clear out pending request */
 		cJSON_AddNumberToObject(data_json, "request_id", req_id);
 		cJSON_AddNumberToObject(data_json, "from_id", sender_node->id);
 		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_host");
 
 		char *request_str = stringify_json(data_json);
 
+		/* Find host and send this to it */
 		client_node_t *iter = clients_head;
 		while (iter) {
 			if (iter->is_host) {
@@ -426,32 +436,30 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 			}
 			iter = iter->next;
 		}
-
 		free(request_str);
-		goto cleanup;
 	}
 	/* If the message is a host's response to client, foward it to that
 	   client based on 'to_client' field. This is for response events */
 	else if (cJSON_IsNumber(to_client_item)) {
-		/* Complete the request (remove from pending requests and stop
-		 * timeout timers) */
+		/* Get request id from host's message */
 		cJSON *req_id_item = cJSON_GetObjectItemCaseSensitive(
 			data_json, "request_id");
+		/* If "request_id", clear out the pending request based on that
+		 * id */
 		if (cJSON_IsNumber(req_id_item))
 			complete_request(req_id_item->valueint);
 
+		/* Find client to foward host's response */
 		int client_id = to_client_item->valueint;
 		uv_stream_t *dest = find_client_stream_by_id(client_id);
 
 		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_client");
 
+		/* Send the response to client */
 		char *response_str = stringify_json(data_json);
-		if (dest) {
+		if (dest)
 			send_message(dest, response_str);
-			free(response_str);
-		}
-
-		goto cleanup;
+		free(response_str);
 	}
 	/* If no 'to_client' or 'to_host' fields, broadcast to everyne. This for
 	   broadcast events */
@@ -459,13 +467,81 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		char *broadcast_str = stringify_json(data_json);
 		broadcast_message(client, broadcast_str);
 		free(broadcast_str);
-
-		goto cleanup;
 	}
 
-cleanup:
 	cJSON_Delete(data_json);
-	free(buf->base);
+}
+
+void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
+{
+	client_node_t *node = (client_node_t *)client->data;
+
+	/* If client disconnects "loudly" then close it, keepalive will hadle
+	 * more silent disconnects, but a heartbeat system might be added later
+	 */
+	if (nread < 0) {
+		if (nread != UV_EOF)
+			fprintf(stderr, "[error] Read error %s\n",
+				uv_err_name(nread));
+		uv_close((uv_handle_t *)client, on_close);
+		free(buf->base);
+		return;
+	}
+
+	if (nread > 0) {
+		/* Check the capacity and if not enough allocate more memory to
+		 * it. TODO!: Add limits (client can consume server's entire
+		 * memory now) */
+		while (node->rb_len + nread > node->rb_capacity) {
+			size_t new_capacity = node->rb_capacity * 2;
+			/* Not using xrealloc here, because usually the sizes
+			 * that this is allocating are huge and server might not
+			 * have enough space for it. So to reduce crashes just
+			 * kick it out already */
+			char *new_ptr = realloc(node->rb, new_capacity);
+
+			if (!new_ptr) {
+				fprintf(stderr, "[error] Out of memory! "
+						"Dropping misbehaving client");
+				uv_close((uv_handle_t *)client, on_close);
+				free(buf->base);
+				return;
+			}
+
+			node->rb = new_ptr;
+			node->rb_capacity = new_capacity;
+		}
+
+		/* Copy new data to read buffer */
+		memcpy(node->rb + node->rb_len, buf->base, nread);
+		node->rb_len += nread;
+
+		/* Process complete messages, delimeter being \n. This
+		 * "should't" cause any problems with json content becouse they
+		 * "should" escape the newline */
+		char *newline_pos;
+		while ((newline_pos = memchr(node->rb, '\n', node->rb_len)) !=
+		       NULL) {
+			size_t msg_len = newline_pos - node->rb;
+			/* TODO: This replaces the newline, fix if causes
+			 * problems */
+			node->rb[msg_len] = '\0';
+
+			process_message(client, node->rb, msg_len);
+
+			node->rb[msg_len] = '\n';
+			/* "Sliding window", move leftover data to read buffer's
+			 * start and start's colleting data on top of it until
+			 * the next newline. TODO: Use circular buffers to make
+			 * this much faster */
+			size_t remaining = node->rb_len - (msg_len + 1);
+			memmove(node->rb, newline_pos + 1, remaining);
+			node->rb_len = remaining;
+		}
+	}
+
+	if (buf->base)
+		free(buf->base);
 }
 
 void on_new_connection(uv_stream_t *server, int status)
