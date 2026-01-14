@@ -486,8 +486,11 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		if (nread != UV_EOF)
 			fprintf(stderr, "[error] Read error %s\n",
 				uv_err_name(nread));
+
 		uv_close((uv_handle_t *)client, on_close);
-		free(buf->base);
+		if (buf->base)
+			free(buf->base);
+
 		return;
 	}
 
