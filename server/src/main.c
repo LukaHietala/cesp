@@ -206,6 +206,8 @@ void remove_client(uv_stream_t *client)
 		if (iter->client_id == node->id) {
 			unlink_pending_request(iter);
 			uv_timer_stop(iter->timer);
+			/* Link iter to timer to make sure it doesn't dangle */
+			iter->timer->data = iter;
 			uv_close((uv_handle_t *)iter->timer, on_timer_close);
 		}
 		iter = next;
@@ -495,8 +497,9 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 	}
 
 	if (nread > 0) {
-		/* Make sure that the buffer size doesn't get too large. If
-		 * client tries to hog more that 10MB memory kick it out */
+		/* Make sure that the client' read buffer size doesn't get too
+		 * large. If client tries to hog more that 10MB memory kick it
+		 * out */
 		if (node->rb_len + nread > MAX_BUFFER_SIZE) {
 			fprintf(stderr,
 				"[error] Client %d sent too much data (%zu "
