@@ -152,13 +152,13 @@ void add_client(uv_stream_t *client)
 	 * data */
 	client->data = node;
 
-	cJSON *root = cJSON_CreateObject();
-	cJSON_AddStringToObject(root, "event", "user_joined");
-	cJSON_AddNumberToObject(root, "id", node->id);
-	cJSON_AddStringToObject(root, "name", node->name);
-	cJSON_AddBoolToObject(root, "is_host", node->is_host);
+	cJSON *event_json = cJSON_CreateObject();
+	cJSON_AddStringToObject(event_json, "event", "user_joined");
+	cJSON_AddNumberToObject(event_json, "id", node->id);
+	cJSON_AddStringToObject(event_json, "name", node->name);
+	cJSON_AddBoolToObject(event_json, "is_host", node->is_host);
 
-	broadcast_message(client, stringify_json(root));
+	broadcast_message(client, stringify_json(event_json));
 }
 
 /* Removes client from tracked clients */
@@ -169,12 +169,12 @@ void remove_client(uv_stream_t *client)
 	if (node == NULL)
 		return;
 
-	cJSON *root = cJSON_CreateObject();
-	cJSON_AddStringToObject(root, "event", "user_left");
-	cJSON_AddNumberToObject(root, "id", node->id);
-	cJSON_AddStringToObject(root, "name", node->name);
+	cJSON *event_json = cJSON_CreateObject();
+	cJSON_AddStringToObject(event_json, "event", "user_left");
+	cJSON_AddNumberToObject(event_json, "id", node->id);
+	cJSON_AddStringToObject(event_json, "name", node->name);
 
-	broadcast_message(client, stringify_json(root));
+	broadcast_message(client, stringify_json(event_json));
 
 	/* Cleanup pending requests that have this client to prevent dangling
 	 * timers that nuke the app */
@@ -260,11 +260,20 @@ void on_request_timeout(uv_timer_t *handle)
 
 	uv_stream_t *client = find_client_stream_by_id(req_data->client_id);
 	if (client) {
-		const char *error_msg =
-			"{\"event\": \"error\", \"data\": "
-			"{\"message\": \"Timeout! Host is too "
-			"incompetent to handle this request on time\"}}\n";
-		send_message(client, error_msg);
+		cJSON *error_json = cJSON_CreateObject();
+		cJSON_AddStringToObject(error_json, "event", "error");
+		cJSON *data_json = cJSON_AddObjectToObject(error_json, "data");
+		cJSON_AddStringToObject(data_json, "type", "timeout");
+		cJSON_AddStringToObject(data_json, "message",
+					"Timeout! Host is too incompetent to "
+					"handle this request on time");
+
+		char *error_str = stringify_json(error_json);
+
+		send_message(client, error_str);
+
+		cJSON_Delete(error_json);
+		free(error_str);
 	}
 
 	unlink_pending_request(req_data);
@@ -334,11 +343,12 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 
 		sender_node->name = strdup(set_name_item->valuestring);
 
-		cJSON *root = cJSON_CreateObject();
-		cJSON_AddStringToObject(root, "event", "name_changed");
-		cJSON_AddNumberToObject(root, "id", sender_node->id);
-		cJSON_AddStringToObject(root, "new_name", sender_node->name);
-		broadcast_message(client, stringify_json(root));
+		cJSON *event_json = cJSON_CreateObject();
+		cJSON_AddStringToObject(event_json, "event", "name_changed");
+		cJSON_AddNumberToObject(event_json, "id", sender_node->id);
+		cJSON_AddStringToObject(event_json, "new_name",
+					sender_node->name);
+		broadcast_message(client, stringify_json(event_json));
 		goto cleanup;
 	}
 
