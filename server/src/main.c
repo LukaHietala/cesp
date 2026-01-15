@@ -137,7 +137,8 @@ uv_stream_t *find_client_stream_by_id(int id)
 	return NULL;
 }
 
-/* Adds client to tracked clients */
+/* Adds client to tracked clients (nodes), which contain the actual stream and
+ * any additional metadata */
 void add_client(uv_stream_t *client)
 {
 	client_node_t *node = (client_node_t *)xmalloc(sizeof(client_node_t));
@@ -153,6 +154,7 @@ void add_client(uv_stream_t *client)
 	node->rb = (char *)xmalloc(node->rb_capacity);
 	node->rb_len = 0;
 
+	/* If this is the first client to join make it the host */
 	if (clients_head == NULL) {
 		node->is_host = 1;
 	} else {
@@ -214,6 +216,9 @@ void remove_client(uv_stream_t *client)
 		iter = next;
 	}
 
+	/* Appoint new host, TODO: instead of making the second oldest client
+	 * the host, make the app work without a host and if there isn't host
+	 * any client can claim the host powers */
 	client_node_t *new_host = NULL;
 
 	if (node->is_host) {
@@ -234,10 +239,11 @@ void remove_client(uv_stream_t *client)
 	if (node->next)
 		node->next->prev = node->prev;
 
+	/* If new host was elected send event about it */
 	if (node->is_host && new_host) {
 		char msg[128];
 		/* TODO: Limit name size and make sure that this doesn't
-		 * overflow */
+		 * overflow. Maybe cJSON? */
 		snprintf(msg, sizeof(msg),
 			 "{\"event\":\"new_host\",\"name\":\"%s\"}\n",
 			 new_host->name);
@@ -257,6 +263,7 @@ void remove_client(uv_stream_t *client)
 	client->data = NULL;
 }
 
+/* Called by on_write_ready to cleanup write req and it's data */
 void free_write_req(uv_write_t *req)
 {
 	write_req_t *wr = (write_req_t *)req;
@@ -264,18 +271,25 @@ void free_write_req(uv_write_t *req)
 	free(wr);
 }
 
+/* Allocates a new buffer space on read, libuv provides the suggested size for
+ * it based on kernel's socket receive buffer so we don't have to worry about it
+ */
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
 	buf->base = (char *)xmalloc(suggested_size);
 	buf->len = suggested_size;
 }
 
+/* On disconnect for example. Libuv provides the disconnected client's handle
+ * and based on that we can delete and free all client data and the handle
+ * itself */
 void on_close(uv_handle_t *handle)
 {
 	remove_client((uv_stream_t *)handle);
 	free(handle);
 }
 
+/* When write is ready, libuv calls this the request data and status */
 void on_write_ready(uv_write_t *req, int status)
 {
 	if (status)
@@ -284,7 +298,7 @@ void on_write_ready(uv_write_t *req, int status)
 	free_write_req(req);
 }
 
-/* Notifies client on request timeout */
+/* Notifies client on request timeout, we provide the handle */
 void on_request_timeout(uv_timer_t *handle)
 {
 	pending_request_t *req_data = (pending_request_t *)handle->data;
@@ -436,6 +450,7 @@ void process_message(uv_stream_t *client, const char *msg_str, size_t len)
 		timer->data = req_context;
 		req_context->timer = timer;
 
+		/* Start the timer and add it to pending reqs */
 		uv_timer_start(timer, on_request_timeout, DEFAULT_TIMEOUT, 0);
 		add_pending_request(req_context);
 
@@ -584,6 +599,8 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		free(buf->base);
 }
 
+/* Called on new connection. Libuv provides client's stream handle and status.
+ * Then accept the client and start listening it */
 void on_new_connection(uv_stream_t *server, int status)
 {
 	if (status < 0) {
@@ -592,8 +609,10 @@ void on_new_connection(uv_stream_t *server, int status)
 		return;
 	}
 
+	/* Create new tcp handle for client */
 	uv_tcp_t *client = (uv_tcp_t *)xmalloc(sizeof(uv_tcp_t));
 	uv_tcp_init(loop, client);
+	/* Accept, start read and add as "client_node" */
 	if (uv_accept(server, (uv_stream_t *)client) == 0) {
 		uv_tcp_keepalive(client, 1, 60);
 		add_client((uv_stream_t *)client);
@@ -609,8 +628,10 @@ int main()
 	 * crash the app. This handles it gracefully */
 	signal(SIGPIPE, SIG_IGN);
 
+	/* Start libuv main loop */
 	loop = uv_default_loop();
 
+	/* Create and bind the server to a socket and start listening */
 	uv_tcp_t server;
 	uv_tcp_init(loop, &server);
 
