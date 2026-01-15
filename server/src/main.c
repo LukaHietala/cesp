@@ -314,6 +314,11 @@ void on_request_timeout(uv_timer_t *handle)
 /* Sends message to spesified stream */
 void send_message(uv_stream_t *dest, const char *msg)
 {
+	/* Dont even begin to do anything if destination is closing, this is
+	 * technically against the libuv docs but shouldn't cause any issues */
+	if (uv_is_closing((uv_handle_t *)dest))
+		return;
+
 	client_node_t *node = (client_node_t *)dest->data;
 	if (node) {
 		printf("[info] Sending %zu bytes to client %d (%s): %s",
@@ -327,7 +332,13 @@ void send_message(uv_stream_t *dest, const char *msg)
 	char *msg_copy = strdup(msg);
 
 	req->buf = uv_buf_init(msg_copy, strlen(msg_copy));
-	uv_write((uv_write_t *)req, dest, &req->buf, 1, on_write_ready);
+	int r = uv_write((uv_write_t *)req, dest, &req->buf, 1, on_write_ready);
+
+	/* If writing fails clean up */
+	if (r < 0) {
+		fprintf(stderr, "[info] uv_write failed: %s\n", uv_strerror(r));
+		free_write_req((uv_write_t *)req);
+	}
 }
 
 /* Sends message to every client other than the sender. Message has to end with
