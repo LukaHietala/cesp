@@ -139,14 +139,16 @@ char* cb_get_string(struct circular_buffer *cb)
 		const char* newline_pos = memchr(cb->buffer, '\n', cb->head - cb->buffer);
 		if (!newline_pos)
 			return NULL;
-		const size_t second_portion = newline_pos - cb->buffer;
+		const size_t second_portion = newline_pos - cb->buffer + 1;
 		cb->tmp = xmalloc(first_portion + second_portion);
 		/* Copy the string to the newly allocated memory */
 		memcpy(cb->tmp, cb->tail, first_portion);
 		/* Second portion */
 		memcpy(cb->tmp + first_portion, cb->buffer, second_portion);
 		/* null-terminator */
-		*(cb->tmp + second_portion) = '\0';
+		*(cb->tmp + first_portion + second_portion - 1) = '\0';
+		/* I don't really know how exactly all this works out when
+		 * it comes to the off-by-one situations, but trust the process */
 		return cb->tmp;
 	} else {
 		/* Convert \n to \0 */
