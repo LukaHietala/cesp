@@ -145,7 +145,7 @@ void add_client(uv_stream_t *client)
 
 	node->client = client;
 	node->id = next_client_id++;
-	node->name = strdup("Jaakko");
+	node->name = NULL;
 	node->next = clients_head;
 	node->prev = NULL;
 
@@ -168,18 +168,6 @@ void add_client(uv_stream_t *client)
 	 * functions. Libuv provides this really useful data field for arbituary
 	 * data */
 	client->data = node;
-
-	cJSON *event_json = cJSON_CreateObject();
-	cJSON_AddStringToObject(event_json, "event", "user_joined");
-	cJSON_AddNumberToObject(event_json, "id", node->id);
-	cJSON_AddStringToObject(event_json, "name", node->name);
-	cJSON_AddBoolToObject(event_json, "is_host", node->is_host);
-
-	char *event_str = stringify_json(event_json);
-	broadcast_message(client, event_str);
-
-	cJSON_Delete(event_json);
-	free(event_str);
 }
 
 /* Removes client from tracked clients */
@@ -400,6 +388,14 @@ void process_message(uv_stream_t *client, const char *msg_str, size_t len)
 	 * it for commands like 'set_name' */
 	client_node_t *sender_node = (client_node_t *)client->data;
 
+	/* TODO: Make handshake event */
+	if (sender_node->name == NULL &&
+	    !cJSON_HasObjectItem(data_json, "set_name")) {
+		send_message(client, "{\"event\":\"error\",\"message\":\"Set "
+				     "name first!\"}\n");
+		return;
+	}
+
 	cJSON *to_host_item =
 		cJSON_GetObjectItemCaseSensitive(data_json, "to_host");
 	cJSON *to_client_item =
@@ -409,27 +405,48 @@ void process_message(uv_stream_t *client, const char *msg_str, size_t len)
 
 	/* If message has 'set_name' field, set that client's name to it and
 	 * don't do anything else */
+	// Inside process_message...
 	if (cJSON_IsString(set_name_item) &&
 	    set_name_item->valuestring != NULL) {
-		/* If sender already has a name override it */
-		if (sender_node->name)
+		int is_first_time = (sender_node->name == NULL);
+
+		if (!is_first_time)
 			free(sender_node->name);
 		sender_node->name = strdup(set_name_item->valuestring);
 
-		/* Create response to broadcast, TODO: craft spesific success
-		 * message to client that actually changed the name */
-		cJSON *event_json = cJSON_CreateObject();
-		cJSON_AddStringToObject(event_json, "event", "name_changed");
-		cJSON_AddNumberToObject(event_json, "id", sender_node->id);
-		cJSON_AddStringToObject(event_json, "new_name",
-					sender_node->name);
+		if (is_first_time) {
+			cJSON *join_json = cJSON_CreateObject();
+			cJSON_AddStringToObject(join_json, "event",
+						"user_joined");
+			cJSON_AddNumberToObject(join_json, "id",
+						sender_node->id);
+			cJSON_AddStringToObject(join_json, "name",
+						sender_node->name);
+			cJSON_AddBoolToObject(join_json, "is_host",
+					      sender_node->is_host);
 
-		char *event_str = stringify_json(event_json);
-		broadcast_message(client, event_str);
+			char *join_str = stringify_json(join_json);
+			broadcast_message(NULL, join_str);
 
-		cJSON_Delete(event_json);
-		free(event_str);
+			cJSON_Delete(join_json);
+			free(join_str);
+		} else {
+			cJSON *event_json = cJSON_CreateObject();
+			cJSON_AddStringToObject(event_json, "event",
+						"name_changed");
+			cJSON_AddNumberToObject(event_json, "id",
+						sender_node->id);
+			cJSON_AddStringToObject(event_json, "new_name",
+						sender_node->name);
+
+			char *event_str = stringify_json(event_json);
+			broadcast_message(client, event_str);
+
+			cJSON_Delete(event_json);
+			free(event_str);
+		}
 	}
+
 	/* If message has 'to_host' field set to true send the request to host
 	 * with 'from_id' that identifies sender. 'from_id' is used by the host
 	 * later to send reply to the client that made the request in the first
