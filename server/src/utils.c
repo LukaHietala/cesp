@@ -75,3 +75,159 @@ void *xrealloc(void *ptr, size_t size)
 		die("Out of memory (realloc failed for %zu bytes)\n", size);
 	return new_ptr;
 }
+
+/* Initialize a circular buffer */
+void cb_init(struct circular_buffer *cb, size_t size)
+{
+	cb->size = size;
+	cb->amount = 0;
+	cb->buffer = (char *)xmalloc(cb->size);
+	cb->buffer_end = cb->buffer + cb->size;
+	cb->head = cb->buffer;
+	cb->tail = cb->buffer;
+	cb->tmp = NULL;
+}
+
+/* Free the memory held by a circular buffer */
+void cb_free(struct circular_buffer *cb)
+{
+	free(cb->buffer);
+	cb->buffer = NULL;
+	cb->buffer_end = NULL;
+	cb->tail = NULL;
+	cb->head = NULL;
+}
+
+/* Copy data_len bytes to the head of the buffer, head
+ * to the end of the newly allocated portion of memory. */
+void cb_push_data(struct circular_buffer *cb, char *data, size_t data_len)
+{
+	cb->amount += data_len;
+	/* If data loops over the end */
+	if (cb->head + data_len > cb->buffer_end) {
+		/* Copy the two portions seperately */
+		/* First portion from the head to the end of the buffer */
+		const size_t first_portion = cb->buffer_end - cb->head;
+		/* Second portion from the beginning of the buffer to the
+		 * rest of the data amount */
+		const size_t second_portion = data_len - first_portion;
+		/* Copy memory */
+		memcpy(cb->head, data, first_portion);
+		memcpy(cb->buffer, data + first_portion, second_portion);
+		/* Move pointers */
+		cb->head = cb->buffer + second_portion;
+	} else {
+		/* Directly copy data */
+		memcpy(cb->head, data, data_len);
+		cb->head += data_len;
+	}
+}
+
+/* Return a usable c-string from the tail, and tail to the beginning
+ * of the next possible string */
+char *cb_get_string(struct circular_buffer *cb)
+{
+	/* If string wraps over loop */
+	if (cb->tail > cb->head) {
+		/* We can't directly pass the tail
+		 * forward, since it wouldn't be
+		 * a valid string here */
+
+		/* First portion from the tail to the end of the buffer */
+		const size_t first_portion = cb->buffer_end - cb->tail;
+		/* Second portion from the beginning of the buffer to head */
+		const char *newline_pos =
+			memchr(cb->buffer, '\n', cb->head - cb->buffer);
+		if (!newline_pos)
+			return NULL;
+		const size_t second_portion = newline_pos - cb->buffer + 1;
+		cb->tmp = xmalloc(first_portion + second_portion);
+		/* Copy the string to the newly allocated memory */
+		memcpy(cb->tmp, cb->tail, first_portion);
+		/* Second portion */
+		memcpy(cb->tmp + first_portion, cb->buffer, second_portion);
+		/* null-terminator */
+		*(cb->tmp + first_portion + second_portion - 1) = '\0';
+		/* Move tail past to the beginning of the next string */
+		cb->tail = (char *)newline_pos + 1;
+		/* Negate counter */
+		cb->amount -= first_portion + second_portion;
+		return cb->tmp;
+	} else {
+		/* Convert \n to \0 */
+		char *ptr = memchr(cb->tail, '\n', cb->head - cb->tail);
+		if (ptr) {
+			*ptr = '\0';
+			/* String to return */
+			char *str = cb->tail;
+			/* Negate counter */
+			cb->amount -= ptr - str + 1;
+			/* Move tail past the end of the string so next time
+			 * cb_get_string is called, it will return a different
+			 * string, if it finds one before the header.
+			 * (before the head, because if that clause wasn't
+			 * present, it would read old strings from the buffer)
+			 */
+			cb->tail = ptr + 1;
+			return str;
+		}
+		return NULL;
+	}
+}
+
+/* Reallocate the memory of the buffer */
+void cb_realloc(struct circular_buffer *cb, size_t new_size)
+{
+	/* No error checking since it will be check manually
+	 * when this function is called */
+	/* Remember offset */
+	const size_t head_offset = cb->head - cb->buffer;
+	const size_t tail_offset = cb->tail - cb->buffer;
+	/* Reallocated */
+	cb->buffer = realloc(cb->buffer, new_size);
+	if (!cb->buffer)
+		return;
+	/* Move pointers */
+	cb->buffer_end = cb->buffer + new_size;
+	/* Write down new and old size */
+	const size_t old_size = cb->size;
+	cb->size = new_size;
+	/* If current data is split, move it */
+	if (cb->tail > cb->head) {
+		/* Here we only need to move the second chunk,
+		 * since the first one must by definition be
+		 * after it */
+		/* Copy a region from them beginning of buffer to the head
+		 * to immediately after the original end of the buffer */
+		memcpy(cb->buffer + old_size, cb->buffer, head_offset);
+		/* Then move the head */
+		cb->head = cb->buffer + old_size + head_offset;
+
+	} else
+		/* Even if data is not split, still need to move pointers
+		 * from the old memory block to then new one, just in case */
+		cb->head = cb->buffer + head_offset;
+	/* Finally move the tail */
+	cb->tail = cb->buffer + tail_offset;
+}
+
+void cb_clean_string(struct circular_buffer *cb)
+{
+	/* Free temporary memory */
+	if (cb->tmp) {
+		free(cb->tmp);
+		cb->tmp = NULL;
+		return;
+	}
+
+	/* Convert \0 back to \n */
+	char *ptr = cb->tail - 1;
+	if (*ptr == '\0') {
+		*ptr = '\n';
+	} else {
+		fprintf(stderr,
+			"[error] Unable to clean string: Expected \\0, found "
+			"'%c'\n",
+			*ptr);
+	}
+}

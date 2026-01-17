@@ -9,9 +9,8 @@
 #define DEFAULT_PORT	8080
 #define DEFAULT_BACKLOG 128
 #define DEFAULT_TIMEOUT 5000 /* ms */
-#define MAX_BUFFER_SIZE \
-	(10 * 1024 *    \
-	 1024) /* 10 MB, should be enough for any text file. If not,...???*/
+/* 10 MB, should be enough for any text file. If not,...???*/
+#define MAX_BUFFER_SIZE (10 * 1024 * 1024)
 
 uv_loop_t *loop;
 struct sockaddr_in addr;
@@ -27,12 +26,7 @@ typedef struct client_node {
 	int id;
 	int is_host;
 	char *name;
-
-	/* Read buffers */
-	char *rb;
-	size_t rb_len;
-	size_t rb_capacity;
-
+	struct circular_buffer buffer;
 	struct client_node *next;
 	struct client_node *prev;
 } client_node_t;
@@ -150,9 +144,7 @@ void add_client(uv_stream_t *client)
 	node->prev = NULL;
 
 	/* Read buffers, start with 1KB and go on from there */
-	node->rb_capacity = 1024;
-	node->rb = (char *)xmalloc(node->rb_capacity);
-	node->rb_len = 0;
+	cb_init(&(node->buffer), 1024);
 
 	/* If this is the first client to join make it the host */
 	if (clients_head == NULL) {
@@ -239,8 +231,8 @@ void remove_client(uv_stream_t *client)
 		broadcast_message(NULL, msg);
 	}
 
-	if (node->rb)
-		free(node->rb);
+	if (node->buffer.buffer)
+		cb_free(&(node->buffer));
 
 	if (node->name)
 		free(node->name);
@@ -375,7 +367,7 @@ void broadcast_message(uv_stream_t *sender, const char *msg)
 }
 
 /* Processes every full message ending with newline */
-void process_message(uv_stream_t *client, const char *msg_str, size_t len)
+void process_message(uv_stream_t *client, const char *msg_str)
 {
 	/* Parse json message */
 	cJSON *data_json = cJSON_Parse(msg_str);
@@ -534,11 +526,14 @@ cleanup:
 	cJSON_Delete(data_json);
 }
 
+/* Main function for reading data from libuv */
 void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 {
 	client_node_t *node = (client_node_t *)client->data;
+	fprintf(stderr, "[debug] Amount of unparsed data left: %ld\n",
+		node->buffer.amount);
 
-	/* If client disconnects "loudly" then close it, keepalive will hadle
+	/* If client disconnects "loudly" then close it, keepalive will handle
 	 * more silent disconnects, but a heartbeat system might be added later
 	 */
 	if (nread < 0) {
@@ -557,12 +552,12 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		/* Make sure that the client' read buffer size doesn't get too
 		 * large. If client tries to hog more that 10MB memory kick it
 		 * out */
-		if (node->rb_len + nread > MAX_BUFFER_SIZE) {
+		if (node->buffer.amount + nread > MAX_BUFFER_SIZE) {
 			fprintf(stderr,
-				"[error] Client %d sent too much data (%zu "
+				"[error] Client %d sent too much data (<%zu "
 				"bytes). Sending couple petabytes to "
 				"retaliate\n",
-				node->id, node->rb_len + nread);
+				node->id, node->buffer.amount + nread);
 
 			uv_close((uv_handle_t *)client, on_close);
 
@@ -572,56 +567,38 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		}
 		/* Check the capacity and if not enough allocate more memory to
 		 * it */
-		while (node->rb_len + nread > node->rb_capacity) {
-			size_t new_capacity = node->rb_capacity * 2;
+		while (node->buffer.amount + nread > node->buffer.size) {
+			size_t new_capacity = node->buffer.size * 2;
 			/* Not using xrealloc here, because usually the sizes
 			 * that this is allocating are huge and server might not
 			 * have enough space for it. So to reduce crashes just
 			 * kick it out already */
-			char *new_ptr = realloc(node->rb, new_capacity);
+			cb_realloc(&(node->buffer), new_capacity);
 
-			if (!new_ptr) {
+			if (!node->buffer.buffer) {
 				fprintf(stderr, "[error] Out of memory! "
 						"Dropping misbehaving client");
 				uv_close((uv_handle_t *)client, on_close);
 				free(buf->base);
 				return;
 			}
-
-			node->rb = new_ptr;
-			node->rb_capacity = new_capacity;
 		}
 
-		/* Copy new data to read buffer, since read buffer might have
-		 * some data from previous leftovers make sure to account for
-		 * that by adding rb_len  */
-		memcpy(node->rb + node->rb_len, buf->base, nread);
-		node->rb_len += nread;
+		/* Copy new data to read buffer */
+		cb_push_data(&(node->buffer), buf->base, nread);
 
 		/* Process complete messages, delimeter being \n. This
-		 * "should't" cause any problems with json content becouse they
+		 * shouldn't cause any problems with json content because they
 		 * "should" escape the newline */
-		char *newline_pos;
-		while ((newline_pos = memchr(node->rb, '\n', node->rb_len)) !=
-		       NULL) {
-			size_t msg_len = newline_pos - node->rb;
-			/* Make read buffer a valid cstring for process message,
-			 * the turn it back to valid message */
-			node->rb[msg_len] = '\0';
-
-			process_message(client, node->rb, msg_len);
-
-			node->rb[msg_len] = '\n';
-			/* "Sliding window", move leftover data to read buffer's
-			 * start and start's colleting data on top of it until
-			 * the next newline. TODO: Use circular buffers to make
-			 * this much faster */
-			size_t remaining = node->rb_len - (msg_len + 1);
-			memmove(node->rb, newline_pos + 1, remaining);
-			node->rb_len = remaining;
+		char *buf_string;
+		while ((buf_string = cb_get_string(&(node->buffer)))) {
+			process_message(client, buf_string);
+			/* cb_get_string will replace \n with \0 as well as
+			 * possibly allocating a new temporary buffer, this
+			 * will clean up any undesired complications. */
+			cb_clean_string(&(node->buffer));
 		}
 	}
-
 	if (buf->base)
 		free(buf->base);
 }
