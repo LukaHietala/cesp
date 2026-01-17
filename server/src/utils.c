@@ -100,7 +100,7 @@ void cb_free(struct circular_buffer *cb)
 
 /* Copy data_len bytes to the head of the buffer, head
  * to the end of the newly allocated portion of memory. */
-void cb_push_data(struct circular_buffer *cb, char* data, size_t data_len)
+void cb_push_data(struct circular_buffer *cb, char *data, size_t data_len)
 {
 	cb->amount += data_len;
 	/* If data loops over the end */
@@ -125,7 +125,7 @@ void cb_push_data(struct circular_buffer *cb, char* data, size_t data_len)
 
 /* Return a usable c-string from the tail, and tail to the beginning
  * of the next possible string */
-char* cb_get_string(struct circular_buffer *cb)
+char *cb_get_string(struct circular_buffer *cb)
 {
 	/* If string wraps over loop */
 	if (cb->tail > cb->head) {
@@ -136,7 +136,8 @@ char* cb_get_string(struct circular_buffer *cb)
 		/* First portion from the tail to the end of the buffer */
 		const size_t first_portion = cb->buffer_end - cb->tail;
 		/* Second portion from the beginning of the buffer to head */
-		const char* newline_pos = memchr(cb->buffer, '\n', cb->head - cb->buffer);
+		const char *newline_pos =
+			memchr(cb->buffer, '\n', cb->head - cb->buffer);
 		if (!newline_pos)
 			return NULL;
 		const size_t second_portion = newline_pos - cb->buffer + 1;
@@ -154,19 +155,20 @@ char* cb_get_string(struct circular_buffer *cb)
 		return cb->tmp;
 	} else {
 		/* Convert \n to \0 */
-		char* ptr = memchr(cb->tail, '\n', cb->head - cb->tail);
+		char *ptr = memchr(cb->tail, '\n', cb->head - cb->tail);
 		if (ptr) {
 			*ptr = '\0';
 			/* String to return */
-			char* str = cb->tail;
+			char *str = cb->tail;
 			/* Negate counter */
 			cb->amount -= ptr - str + 1;
 			/* Move tail past the end of the string so next time
 			 * cb_get_string is called, it will return a different
 			 * string, if it finds one before the header.
-			 * (before the head, because if that clause wasn't present,
-			 * it would read old strings from the buffer) */
-			cb->tail = ptr+1;
+			 * (before the head, because if that clause wasn't
+			 * present, it would read old strings from the buffer)
+			 */
+			cb->tail = ptr + 1;
 			return str;
 		}
 		return NULL;
@@ -200,7 +202,7 @@ void cb_realloc(struct circular_buffer *cb, size_t new_size)
 		memcpy(cb->buffer + old_size, cb->buffer, head_offset);
 		/* Then move the head */
 		cb->head = cb->buffer + old_size + head_offset;
-		
+
 	} else
 		/* Even if data is not split, still need to move pointers
 		 * from the old memory block to then new one, just in case */
@@ -215,13 +217,17 @@ void cb_clean_string(struct circular_buffer *cb)
 	if (cb->tmp) {
 		free(cb->tmp);
 		cb->tmp = NULL;
+		return;
+	}
+
+	/* Convert \0 back to \n */
+	char *ptr = cb->tail - 1;
+	if (*ptr == '\0') {
+		*ptr = '\n';
 	} else {
-		/* Convert \0 to \n */
-		char* ptr = cb->tail - 1;
-		if (*ptr == '\0')
-			*ptr = '\n';
-		else
-			die("Unable to clean string");
+		fprintf(stderr,
+			"[error] Unable to clean string: Expected \\0, found "
+			"'%c'\n",
+			*ptr);
 	}
 }
-

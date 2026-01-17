@@ -504,8 +504,7 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 {
 	client_node_t *node = (client_node_t *)client->data;
 	fprintf(stderr, "[debug] Amount of unparsed data left: %ld\n",
-			node->buffer.amount);
-	
+		node->buffer.amount);
 
 	/* If client disconnects "loudly" then close it, keepalive will handle
 	 * more silent disconnects, but a heartbeat system might be added later
@@ -564,7 +563,7 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		/* Process complete messages, delimeter being \n. This
 		 * shouldn't cause any problems with json content because they
 		 * "should" escape the newline */
-		char* buf_string;
+		char *buf_string;
 		while ((buf_string = cb_get_string(&(node->buffer)))) {
 			process_message(client, buf_string);
 			/* cb_get_string will replace \n with \0 as well as
