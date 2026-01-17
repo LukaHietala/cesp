@@ -17,6 +17,7 @@ def main():
     try:
         s.connect(("127.0.0.1", 8080))
 
+        s.sendall(b'{"event":"handshake","name":"koira"}')
         start_time = time.perf_counter()
 
         for _ in range(TOTAL_MESSAGES // BATCH_SIZE):
