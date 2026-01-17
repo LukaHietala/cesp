@@ -183,10 +183,29 @@ void cb_realloc(struct circular_buffer *cb, size_t new_size)
 	const size_t tail_offset = cb->tail - cb->buffer;
 	/* Reallocated */
 	cb->buffer = realloc(cb->buffer, new_size);
-	/* Correct pointers */
+	if (!cb->buffer)
+		return;
+	/* Move pointers */
 	cb->buffer_end = cb->buffer + new_size;
+	/* Write down new and old size */
+	const size_t old_size = cb->size;
 	cb->size = new_size;
-	cb->head = cb->buffer + head_offset;
+	/* If current data is split, move it */
+	if (cb->tail > cb->head) {
+		/* Here we only need to move the second chunk,
+		 * since the first one must by definition be
+		 * after it */
+		/* Copy a region from them beginning of buffer to the head
+		 * to immediately after the original end of the buffer */
+		memcpy(cb->buffer + old_size, cb->buffer, head_offset);
+		/* Then move the head */
+		cb->head = cb->buffer + old_size + head_offset;
+		
+	} else
+		/* Even if data is not split, still need to move pointers
+		 * from the old memory block to then new one, just in case */
+		cb->head = cb->buffer + head_offset;
+	/* Finally move the tail */
 	cb->tail = cb->buffer + tail_offset;
 }
 

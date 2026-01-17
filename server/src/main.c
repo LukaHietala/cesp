@@ -562,7 +562,7 @@ void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 		cb_push_data(&(node->buffer), buf->base, nread);
 
 		/* Process complete messages, delimeter being \n. This
-		 * "should't" cause any problems with json content because they
+		 * shouldn't cause any problems with json content because they
 		 * "should" escape the newline */
 		char* buf_string;
 		while ((buf_string = cb_get_string(&(node->buffer)))) {
