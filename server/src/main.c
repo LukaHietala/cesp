@@ -34,7 +34,8 @@ typedef struct client_node {
 int next_client_id = 0;
 client_node_t *clients_head = NULL;
 
-/* Pending requests */
+/* Pending requests, TODO: Make slot based system if performance becomes an
+ * issue */
 typedef struct pending_request {
 	int request_id;
 	int client_id;
@@ -443,85 +444,114 @@ void process_message(uv_stream_t *client, const char *msg_str)
 		goto cleanup;
 	}
 
-	cJSON *to_host_item =
-		cJSON_GetObjectItemCaseSensitive(data_json, "to_host");
-	cJSON *to_client_item =
-		cJSON_GetObjectItemCaseSensitive(data_json, "to_client");
+	/* Per event routing, some events like request_files fill be fowarded to
+	 * host with request id, and host can respond to that with correct event
+	 * like response_files with that same request_id. The response will be
+	 * fowarded to the corrrect client by the request id. This is to try to
+	 * keep the clients as stateless as possible to keep consitency. And if
+	 * client wants to broadcast something or do something "not default" it
+	 * must be handle on per basis. */
+	cJSON *req_id_item =
+		cJSON_GetObjectItemCaseSensitive(data_json, "request_id");
 
-	/* If message has 'to_host' field set to true send the request to host
-	 * with 'from_id' that identifies sender. 'from_id' is used by the host
-	 * later to send reply to the client that made the request in the first
-	 * place. This is for request events */
-	if (cJSON_IsBool(to_host_item) && cJSON_IsTrue(to_host_item)) {
-		int req_id = next_request_id++;
+	/* If message has request_id, its from host so this is for response
+	 * events */
+	if (cJSON_IsNumber(req_id_item)) {
+		int req_id = req_id_item->valueint;
+		int target_client_id = -1;
 
-		/* Creates a pending request */
-		pending_request_t *req_context =
-			xmalloc(sizeof(pending_request_t));
-		req_context->request_id = req_id;
-		req_context->client_id = sender_node->id;
-
-		/* Adds timer to that pending request, will be deleted if result
-		 * is on time */
-		uv_timer_t *timer = xmalloc(sizeof(uv_timer_t));
-		uv_timer_init(loop, timer);
-		timer->data = req_context;
-		req_context->timer = timer;
-
-		/* Start the timer and add it to pending reqs */
-		uv_timer_start(timer, on_request_timeout, DEFAULT_TIMEOUT, 0);
-		add_pending_request(req_context);
-
-		/* Add more metadata to give to host, so it can use it to route
-		 * the info to right place and clear out pending request */
-		cJSON_AddNumberToObject(data_json, "request_id", req_id);
-		cJSON_AddNumberToObject(data_json, "from_id", sender_node->id);
-		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_host");
-
-		char *request_str = stringify_json(data_json);
-
-		/* Find host and send this to it */
-		client_node_t *iter = clients_head;
+		/* Find the pending request to discover who sent it
+		 * originally */
+		pending_request_t *iter = requests_head;
 		while (iter) {
-			if (iter->is_host) {
-				send_message(iter->client, request_str);
+			if (iter->request_id == req_id) {
+				target_client_id = iter->client_id;
 				break;
 			}
 			iter = iter->next;
 		}
-		free(request_str);
+
+		/* If found, forward the message to that client */
+		if (target_client_id != -1) {
+			uv_stream_t *dest =
+				find_client_stream_by_id(target_client_id);
+
+			char *response_str = stringify_json(data_json);
+			if (dest)
+				send_message(dest, response_str);
+			free(response_str);
+
+			/* Mark request as complete (stops timer, frees
+			 * memory) */
+			complete_request(req_id);
+		} else {
+			/* Request is not found (maybe timed out already?) */
+			fprintf(stderr,
+				"[warn] Host replied to expired or unknown "
+				"request ID: %d\n",
+				req_id);
+		}
+
+		goto cleanup;
 	}
-	/* If the message is a host's response to client, foward it to that
-	   client based on 'to_client' field. This is for response events */
-	else if (cJSON_IsNumber(to_client_item)) {
-		/* Get request id from host's message */
-		cJSON *req_id_item = cJSON_GetObjectItemCaseSensitive(
-			data_json, "request_id");
-		/* If "request_id", clear out the pending request based on that
-		 * id */
-		if (cJSON_IsNumber(req_id_item))
-			complete_request(req_id_item->valueint);
-
-		/* Find client to foward host's response */
-		int client_id = to_client_item->valueint;
-		uv_stream_t *dest = find_client_stream_by_id(client_id);
-
-		cJSON_DeleteItemFromObjectCaseSensitive(data_json, "to_client");
-
-		/* Send the response to client */
-		char *response_str = stringify_json(data_json);
-		if (dest)
-			send_message(dest, response_str);
-		free(response_str);
-	}
-	/* If no 'to_client' or 'to_host' fields, broadcast to everyne. This for
-	   broadcast events */
-	else {
+	/* Host broadcasting. If sender is host and it's NOT a response event(no
+	 * request_id), broadcast to everyone. If client want to broadcat
+	 * something, that must be handled spesifically per event.
+	 */
+	else if (sender_node->is_host) {
 		char *broadcast_str = stringify_json(data_json);
 		broadcast_message(client, broadcast_str);
 		free(broadcast_str);
 	}
+	/* Any other message from a non-host client is treated as a request. */
+	else {
+		int req_id = next_request_id++;
 
+		/* Creates a pending request context */
+		pending_request_t *req_context =
+			(pending_request_t *)xmalloc(sizeof(pending_request_t));
+		req_context->request_id = req_id;
+		req_context->client_id = sender_node->id;
+
+		/* Adds timer to that pending request */
+		uv_timer_t *timer = (uv_timer_t *)xmalloc(sizeof(uv_timer_t));
+		uv_timer_init(loop, timer);
+		timer->data = req_context;
+		req_context->timer = timer;
+
+		/* Start timer and add to list */
+		uv_timer_start(timer, on_request_timeout, DEFAULT_TIMEOUT, 0);
+		add_pending_request(req_context);
+
+		/* Inject metadata for host so it knows who sent it and the id
+		 */
+		cJSON_AddNumberToObject(data_json, "request_id", req_id);
+		/* Host doesn't need this for routing but it can be useful for
+		 * client to know who exactly is sending an request event */
+		cJSON_AddNumberToObject(data_json, "from_id", sender_node->id);
+
+		char *request_str = stringify_json(data_json);
+
+		/* Find host and forward the request */
+		client_node_t *iter = clients_head;
+		int host_found = 0;
+		while (iter) {
+			if (iter->is_host) {
+				send_message(iter->client, request_str);
+				host_found = 1;
+				break;
+			}
+			iter = iter->next;
+		}
+
+		if (!host_found) {
+			send_message(client, "{\"event\":\"error\",\"message\":"
+					     "\"No host available\"}\n");
+			complete_request(req_id);
+		}
+
+		free(request_str);
+	}
 cleanup:
 	cJSON_Delete(data_json);
 }

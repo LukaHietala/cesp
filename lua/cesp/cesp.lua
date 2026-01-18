@@ -15,6 +15,52 @@ local function encode_json(json)
 	return ok and res or nil
 end
 
+-- Returns list of files relative to root_path. Uses depth-first search
+function list_files(root_path)
+	root_path = root_path or "."
+	local files = {}
+	local ignore_patterns =
+		{ "%.git", "node_modules", "%.venv", "build", "%.env" }
+
+	local stack = { root_path }
+
+	local function is_ignored(path)
+		for _, pattern in ipairs(ignore_patterns) do
+			if path:match(pattern) then
+				return true
+			end
+		end
+		return false
+	end
+
+	while #stack > 0 do
+		local current_dir = table.remove(stack)
+		local scanner = uv.fs_scandir(current_dir)
+
+		if scanner then
+			for name, type in
+				function()
+					return uv.fs_scandir_next(scanner)
+				end
+			do
+				-- Construct clean path
+				local rel_path = current_dir == "." and name
+					or (current_dir .. "/" .. name)
+
+				if not is_ignored(rel_path) then
+					if type == "directory" then
+						table.insert(stack, rel_path)
+					elseif type == "file" or type == "link" then
+						table.insert(files, rel_path)
+					end
+				end
+			end
+		end
+	end
+
+	return files
+end
+
 local function send_event(event_table)
 	if not M.handle or M.handle:is_closing() then
 		print("Unable to send the event")
@@ -27,11 +73,30 @@ local function send_event(event_table)
 	end
 end
 
-local function start_client()
-	-- Create scratch buffer
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.cmd("vsplit | b" .. buf)
+local function handle_event(json_str)
+	local payload = decode_json(json_str)
+	if not payload or not payload.event then
+		return
+	end
 
+	if payload.event == "request_files" then
+		local file_list = list_files(".")
+
+		send_event({
+			event = "response_files",
+			files = file_list,
+			request_id = payload.request_id,
+		})
+		return
+	end
+
+	if payload.event == "response_files" then
+	end
+
+	print("Not implemented " .. payload.event)
+end
+
+local function start_client()
 	M.handle = uv.new_tcp()
 	local chunks = {}
 
@@ -68,19 +133,13 @@ local function start_client()
 					table.insert(chunks, leftover)
 				end
 
-				-- Update scratch buf
-				if #lines > 0 then
-					vim.schedule(function()
-						if vim.api.nvim_buf_is_valid(buf) then
-							vim.api.nvim_buf_set_lines(
-								buf,
-								-1,
-								-1,
-								false,
-								lines
-							)
-						end
-					end)
+				-- Handle events
+				for _, line in ipairs(lines) do
+					if line ~= "" then
+						vim.schedule(function()
+							handle_event(line)
+						end)
+					end
 				end
 			end
 		end)
