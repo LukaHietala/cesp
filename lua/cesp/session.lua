@@ -1,65 +1,14 @@
 local uv = vim.uv or vim.loop
+local browser = require("cesp.browser")
+local utils = require("cesp.utils")
 
 local M = {}
 
+M.config = {
+	port = 8080,
+}
 -- Current libuv uv_tcp_t handle
 M.handle = nil
-
-local function decode_json(str)
-	local ok, res = pcall(vim.json.decode, str)
-	return ok and res or nil
-end
-
-local function encode_json(json)
-	local ok, res = pcall(vim.json.encode, json)
-	return ok and res or nil
-end
-
--- Returns list of files relative to root_path. Uses depth-first search
-function list_files(root_path)
-	root_path = root_path or "."
-	local files = {}
-	local ignore_patterns =
-		{ "%.git", "node_modules", "%.venv", "build", "%.env" }
-
-	local stack = { root_path }
-
-	local function is_ignored(path)
-		for _, pattern in ipairs(ignore_patterns) do
-			if path:match(pattern) then
-				return true
-			end
-		end
-		return false
-	end
-
-	while #stack > 0 do
-		local current_dir = table.remove(stack)
-		local scanner = uv.fs_scandir(current_dir)
-
-		if scanner then
-			for name, type in
-				function()
-					return uv.fs_scandir_next(scanner)
-				end
-			do
-				-- Construct clean path
-				local rel_path = current_dir == "." and name
-					or (current_dir .. "/" .. name)
-
-				if not is_ignored(rel_path) then
-					if type == "directory" then
-						table.insert(stack, rel_path)
-					elseif type == "file" or type == "link" then
-						table.insert(files, rel_path)
-					end
-				end
-			end
-		end
-	end
-
-	return files
-end
 
 local function send_event(event_table)
 	if not M.handle or M.handle:is_closing() then
@@ -67,20 +16,20 @@ local function send_event(event_table)
 		return
 	end
 
-	local event_str = encode_json(event_table)
+	local event_str = utils.encode_json(event_table)
 	if event_str then
 		M.handle:write(event_str .. "\n")
 	end
 end
 
 local function handle_event(json_str)
-	local payload = decode_json(json_str)
+	local payload = utils.decode_json(json_str)
 	if not payload or not payload.event then
 		return
 	end
 
 	if payload.event == "request_files" then
-		local file_list = list_files(".")
+		local file_list = utils.get_files(".")
 
 		send_event({
 			event = "response_files",
@@ -91,26 +40,38 @@ local function handle_event(json_str)
 	end
 
 	if payload.event == "response_files" then
+		vim.schedule(function()
+			if payload.files and #payload.files > 0 then
+				browser.open_file_browser(payload.files)
+			else
+				print("No files received")
+			end
+		end)
+		return
 	end
 
 	print("Not implemented " .. payload.event)
 end
 
-local function start_client()
+function M.list_remote_files()
+	send_event({
+		event = "request_files",
+	})
+end
+
+function M.start_client(ip)
 	M.handle = uv.new_tcp()
 	local chunks = {}
 
-	M.handle:connect("127.0.0.1", 8080, function(err)
+	M.handle:connect(ip, 8080, function(err)
 		if err then
 			return print(err)
 		end
 
-		-- Handshake
-		local handshake_event = {
+		send_event({
 			event = "handshake",
 			name = "lentava_pomeranian",
-		}
-		send_event(handshake_event)
+		})
 
 		M.handle:read_start(function(err, chunk)
 			if err or not chunk then
@@ -146,4 +107,10 @@ local function start_client()
 	end)
 end
 
-start_client()
+function M.stop()
+	if M.handle then
+		M.handle:close()
+	end
+end
+
+return M
