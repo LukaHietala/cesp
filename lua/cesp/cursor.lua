@@ -9,6 +9,8 @@ local cursor_au = vim.api.nvim_create_augroup("RemoteCursor", {
 })
 local cursor_ns = vim.api.nvim_create_namespace("remote_cursors")
 
+local RANGE_ID_OFFSET = 100000 -- Offset to keep selection ids unique from cursor ids
+
 -- Goes trough every valid buffer and clears it's cursor namespace
 function M.clear_all_remote_cursors()
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -24,6 +26,12 @@ function M.handle_cursor_leave(payload)
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_is_valid(buf) then
 			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, payload.from_id)
+			pcall(
+				vim.api.nvim_buf_del_extmark,
+				buf,
+				cursor_ns,
+				payload.from_id + RANGE_ID_OFFSET
+			)
 		end
 	end
 end
@@ -34,17 +42,28 @@ function M.start_cursor_tracker()
 		group = cursor_au,
 		callback = function()
 			local path = utils.get_rel_path(0)
-			-- Only send if we are in a valid file buffer
-			if path and path ~= "" then
-				events.send_event({
-					event = "cursor_move",
-					position = vim.api.nvim_win_get_cursor(0),
-					path = path,
-				})
+			if not path or path == "" then
+				return
 			end
+
+			local mode = vim.api.nvim_get_mode().mode
+			local payload = {
+				event = "cursor_move",
+				position = vim.api.nvim_win_get_cursor(0),
+				path = path,
+			}
+
+			-- Check if in visual mode (v, V)
+			if mode:match("[vV]") then
+				local v_pos = vim.fn.getpos("v") -- [buf, row, col, off]
+				payload.selection = {
+					start_pos = { v_pos[2], v_pos[3] - 1 },
+				}
+			end
+
+			events.send_event(payload)
 		end,
 	})
-
 	-- On leave signal to other clients to delete this cursor
 	vim.api.nvim_create_autocmd({ "VimLeavePre" }, {
 		group = cursor_au,
@@ -56,41 +75,81 @@ function M.start_cursor_tracker()
 	})
 end
 
--- Handles "cursor_move" event
 function M.handle_cursor_move(payload)
-	-- Make sure the "from_id" is there, mark ids are based on those
 	if not payload.from_id then
 		return
-	end
-
-	-- ALWAYS clear this specific user's cursor from all buffers first
-	-- This prevents the "ghost" cursor in the previous file
-	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.api.nvim_buf_is_valid(buf) then
-			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, payload.from_id)
-		end
 	end
 
 	local row = payload.position[1] - 1
 	local col = payload.position[2]
 	local name = payload.name or "???"
+	local cursor_id = payload.from_id
+	local selection_id = payload.from_id + RANGE_ID_OFFSET
 
-	-- Try to find the buffer they are currently in
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_is_valid(buf) then
-			local buf_name = vim.api.nvim_buf_get_name(buf)
-			-- Check if this buffer matches the path sent by the client
-			if buf_name:find(payload.path, 1, true) then
-				pcall(vim.api.nvim_buf_set_extmark, buf, cursor_ns, row, col, {
-					id = payload.from_id,
-					end_col = col + 1,
-					hl_group = "TermCursor",
-					virt_text = { { " " .. name, config.cursor.hl_group } },
-					virt_text_pos = config.cursor.pos,
+			-- Clear cursor and selection
+			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, cursor_id)
+			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, selection_id)
+		end
+	end
+
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if
+			vim.api.nvim_buf_is_valid(buf)
+			and vim.api.nvim_buf_get_name(buf):find(payload.path, 1, true)
+		then
+			-- Draw the regular cursor
+			local cursor_opts = {
+				id = cursor_id,
+				hl_group = "TermCursor",
+				virt_text = { { " " .. name, config.cursor.hl_group } },
+				virt_text_pos = config.cursor.pos,
+				end_row = row,
+				end_col = col + 1, -- Highlight exactly one character
+				strict = false,
+			}
+			pcall(
+				vim.api.nvim_buf_set_extmark,
+				buf,
+				cursor_ns,
+				row,
+				col,
+				cursor_opts
+			)
+
+			-- If selection draw the range
+			if payload.selection then
+				local s_row = payload.selection.start_pos[1] - 1
+				local s_col = payload.selection.start_pos[2]
+
+				-- Normalize start/end for the extmark range logic
+				local start_r, start_c, end_r, end_c
+				if s_row < row or (s_row == row and s_col < col) then
+					start_r, start_c = s_row, s_col
+					end_r, end_c = row, col
+				else
+					start_r, start_c = row, col
+					end_r, end_c = s_row, s_col
+				end
+
+				local selection_opts = {
+					id = selection_id,
+					hl_group = "Visual",
+					end_row = end_r,
+					end_col = end_c,
 					strict = false,
-				})
-				break
+				}
+				pcall(
+					vim.api.nvim_buf_set_extmark,
+					buf,
+					cursor_ns,
+					start_r,
+					start_c,
+					selection_opts
+				)
 			end
+			break
 		end
 	end
 end
