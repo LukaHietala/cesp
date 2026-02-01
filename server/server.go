@@ -63,6 +63,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer listener.Close()
 	fmt.Printf("Listening on %s\n", address)
 
 	for {
