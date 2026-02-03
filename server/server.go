@@ -130,75 +130,96 @@ func (s *Server) handleConnection(conn net.Conn) {
 }
 
 func (s *Server) processMessage(client *Client, msg map[string]any) {
-	event, _ := msg["event"].(string)
+    event, _ := msg["event"].(string)
 
-	if event == "handshake" {
-		newName, _ := msg["name"].(string)
-		if newName != "" && client.Name == "" {
-			client.Name = newName
-			s.broadcast(-1, map[string]any{
-				"event": "user_joined", "id": client.ID, "name": client.Name, "is_host": client.IsHost,
-			})
-		}
-		return
-	}
+	// Handshake (add necessary info to client)
+    if event == "handshake" {
+        s.handleHandshake(client, msg)
+        return
+    }
 
-	if client.Name == "" {
-		s.sendJSON(client, map[string]any{"event": "error", "message": "Set name first!"})
-		return
-	}
+    // Name is required for all other events
+    if client.Name == "" {
+        s.sendJSON(client, map[string]any{"event": "error", "message": "Set name first!"})
+        return
+    }
 
-	if event == "cursor_move" || event == "update_content" || event == "cursor_leave" {
-		msg["from_id"] = client.ID
-		msg["name"] = client.Name
-		s.broadcast(client.ID, msg)
-		return
-	}
+    // Route events by type
+    switch event {
+	// To broadcast
+    case "cursor_move", "update_content", "cursor_leave":
+        msg["from_id"] = client.ID
+        msg["name"] = client.Name
+        s.broadcast(client.ID, msg)
+	// Requests to host
+    default:
+		// Request/Response
+        if reqIDFloat, ok := msg["request_id"].(float64); ok {
+            s.resolvePendingRequest(int(reqIDFloat), msg)
+        } else {
+            s.createNewRequest(client, msg)
+        }
+    }
+}
 
-	if reqIDFloat, ok := msg["request_id"].(float64); ok {
-		reqID := int(reqIDFloat)
-		if pending, exists := s.PendingRequests[reqID]; exists {
-			if target, ok := s.Clients[pending.ClientID]; ok {
-				s.sendJSON(target, msg)
-			}
-			pending.Timer.Stop()
-			delete(s.PendingRequests, reqID)
-		}
-		return
-	}
+func (s *Server) handleHandshake(client *Client, msg map[string]any) {
+    newName, _ := msg["name"].(string)
+    if newName != "" && client.Name == "" {
+        client.Name = newName
+        s.broadcast(-1, map[string]any{
+            "event": "user_joined", "id": client.ID,
+			"name": client.Name,
+			"is_host": client.IsHost,
+        })
+    }
+}
 
-	reqID := s.NextRequestID
-	s.NextRequestID++
+// Deletes pending request (successful response :D)
+func (s *Server) resolvePendingRequest(reqID int, msg map[string]any) {
+    if pending, exists := s.PendingRequests[reqID]; exists {
+        if target, ok := s.Clients[pending.ClientID]; ok {
+            s.sendJSON(target, msg)
+        }
+        pending.Timer.Stop()
+        delete(s.PendingRequests, reqID)
+    }
+}
 
-	pending := &PendingRequest{
-		ClientID:  client.ID,
-		RequestID: reqID,
-	}
-	pending.Timer = time.AfterFunc(RequestTimeout, func() {
-		s.actions <- func() {
+func (s *Server) createNewRequest(client *Client, msg map[string]any) {
+    reqID := s.NextRequestID
+    s.NextRequestID++
+
+    pending := &PendingRequest{
+        ClientID:  client.ID,
+        RequestID: reqID,
+    }
+    pending.Timer = time.AfterFunc(RequestTimeout, func() {
+        s.actions <- func() {
 			s.handleTimeout(reqID)
 		}
-	})
-	s.PendingRequests[reqID] = pending
+    })
+    s.PendingRequests[reqID] = pending
 
-	msg["request_id"] = reqID
-	msg["from_id"] = client.ID
+    msg["request_id"] = reqID
+    msg["from_id"] = client.ID
 
-	var host *Client
-	for _, c := range s.Clients {
-		if c.IsHost {
-			host = c
-			break
-		}
-	}
+    if host := s.getHost(); host != nil {
+        s.sendJSON(host, msg)
+    } else {
+        s.sendJSON(client, map[string]any{"event": "error", "message": "No host available"})
+        pending.Timer.Stop()
+        delete(s.PendingRequests, reqID)
+    }
+}
 
-	if host != nil {
-		s.sendJSON(host, msg)
-	} else {
-		s.sendJSON(client, map[string]any{"event": "error", "message": "No host available"})
-		pending.Timer.Stop()
-		delete(s.PendingRequests, reqID)
-	}
+// TODO: Move to server struct
+func (s *Server) getHost() *Client {
+    for _, c := range s.Clients {
+        if c.IsHost {
+            return c
+        }
+    }
+    return nil
 }
 
 func (s *Server) removeClient(client *Client) {
