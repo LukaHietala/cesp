@@ -120,6 +120,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 			continue
 		}
+		log.Println(string(scanner.Bytes()))
 		// Send task to the "manager"
 		s.actions <- func() {
 			s.processMessage(client, msg)
