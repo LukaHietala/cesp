@@ -1,3 +1,5 @@
+local buffer = require("cesp.buffer")
+
 local M = {}
 local ns_id = vim.api.nvim_create_namespace("RemoteFileBrowserSearch")
 
@@ -209,7 +211,7 @@ function M.open_file_browser(files, on_select)
 end
 
 -- Open remote content in buffer
-function M.open_remote_file(path, content)
+function M.open_remote_file(path, content, on_complete)
 	vim.schedule(function()
 		local target_name = path
 		local found_buf = nil
@@ -252,6 +254,10 @@ function M.open_remote_file(path, content)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
 		vim.api.nvim_set_current_buf(buf)
+
+		if on_complete then
+			on_complete(buf)
+		end
 	end)
 end
 

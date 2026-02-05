@@ -1,4 +1,5 @@
 local browser = require("cesp.browser")
+local buffer = require("cesp.buffer")
 local utils = require("cesp.utils")
 
 local M = {}
@@ -90,7 +91,16 @@ function M.handle_event(json_str)
 		end
 
 		-- Opens an empty buffer that mimics real file buffer
-		browser.open_remote_file(path, content)
+		browser.open_remote_file(path, content, function(buf)
+			-- Attach listeners to it
+			buffer.attach_buf_listener(buf, function(p, c)
+				M.send_event({
+					event = "update_content",
+					path = p,
+					changes = c,
+				})
+			end)
+		end)
 		return
 	end
 

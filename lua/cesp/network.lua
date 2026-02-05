@@ -13,7 +13,7 @@ local function on_read()
 	return function(err, chunk)
 		-- On error/disconnect clear cursors and close gracefully
 		if err or not chunk then
-			vim.schedule(clear_all_remote_cursors)
+			vim.schedule(cursor.clear_all_remote_cursors)
 			return M.handle:close()
 		end
 
@@ -47,7 +47,6 @@ end
 
 function M.start_client(ip)
 	M.handle = uv.new_tcp()
-	local chunks = {}
 
 	M.handle:connect(ip, config.port, function(err)
 		if err then
@@ -63,8 +62,25 @@ function M.start_client(ip)
 
 		-- TODO: add handshake response, so we know "this" client's id and other details
 
-		-- Attach cursor tracker
-		vim.schedule(cursor.start_cursor_tracker)
+		vim.schedule(function()
+			-- Attach cursor tracker
+			cursor.start_cursor_tracker()
+
+			-- Share buf on open
+			vim.api.nvim_create_autocmd("BufReadPost", {
+				callback = function(e)
+					local buffer = require("cesp.buffer")
+					buffer.attach_buf_listener(e.buf, function(path, changes)
+						events.send_event({
+							event = "update_content",
+							path = path,
+							changes = changes,
+						})
+					end)
+				end,
+			})
+		end)
+
 		-- Start reading
 		M.handle:read_start(on_read())
 	end)
