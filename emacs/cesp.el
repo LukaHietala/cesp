@@ -25,6 +25,19 @@
 
 ;;; Code:
 
+;;; Public variables
+
+(defgroup cespconf nil
+  "Variables related to configuring Cesp"
+  :group 'communication)
+
+(defcustom cesp-name "Jaakko"
+  "Your username on Cesp.
+This is the name other users will see when
+you are editing with them"
+  :group 'cespconf
+  :type '(string))
+
 ;;; Internal variables
 
 (defvar cesp-server-process
@@ -38,11 +51,13 @@ the connection to the tcp server")
 ;;;; Connection management
 
 (defun cesp-connect-server(host port)
-  "Creates a connection to a Cesp server.
+  "Connects to a Cesp server.
 This connects your Emacs session to a Cesp server
 at HOST PORT, for example localhost 8080
 which is the default for a Cesp server.
-"
+
+It will then perform the handshake, giving your
+name as per the variable"
   (interactive "sServer hostname: \nsServer port: ")
   (setq cesp-server-process (make-network-process
    :name "cesp-process"
@@ -51,7 +66,9 @@ which is the default for a Cesp server.
    :service port
    :family 'ipv4 ;; TODO: Support for ipv6
    :filter 'cesp-filter
-   :sentinel 'cesp-sentinel)))
+   :sentinel 'cesp-sentinel))
+  (cesp-client-forward '((event . "handshake") (name . "Jaakko")) ) ;; Perform handshake
+  )
 
 (defun cesp-disconnect()
   "Disconnects Emacs from the Cesp server.
@@ -59,12 +76,20 @@ This will disconnect the current Emacs client from
 the Cesp server it is currently connected to, if
 any"
   (interactive)
-  ;; TODO: Check if connected
-  (delete-process "cesp-process"))
+  (if (and cesp-server-process (process-live-p cesp-server-process))
+	  (delete-process "cesp-process")
+	(error "You are not connected to a server!")))
 
 ;;;; File handling
 
-;; TODO
+(defun cesp-get-files()
+  "Sends a request to get the host's files
+This will send a request_files event to the host.
+This function does not handle the response"
+  (interactive)
+  (if (and cesp-server-process (process-live-p cesp-server-process))
+	  (cesp-client-forward '((event . "request_files")))
+	(error "You are not connected to a server!")))
 
 ;;; Internal functions
 
@@ -76,8 +101,8 @@ Clients will only ever directly message the host.
 JSON is an object that is parsed by json-serialize
 into a string.
 "
-  (process-send-string cesp-server-process (json-serialize json-object)))
-  
+  (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
+
 ;;;; Handlers
 
 (defun cesp-filter(proc string)
