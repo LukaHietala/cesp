@@ -111,17 +111,17 @@ func TestHostMigration(t *testing.T) {
 	// Second client
 	c2, _ := net.Dial("tcp", addr)
 	fmt.Fprintln(c2, `{"event": "handshake", "name": "koira"}`)
+
 	time.Sleep(50 * time.Millisecond)
 
 	// Disconnect first host
 	c1.Close()
+
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify that second client is the host
 	done := make(chan bool)
 	server.actions <- func() {
-		host := server.getHost()
-		if host != nil && host.Name == "koira" && host.IsHost {
+		if server.Host != nil && server.Host.Name == "koira" && server.Host.IsHost {
 			done <- true
 		} else {
 			done <- false
