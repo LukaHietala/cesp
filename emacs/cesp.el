@@ -70,7 +70,7 @@ name as per the variable"
    :filter 'cesp--filter
    :sentinel 'cesp--sentinel))
   ;; Perform handshake
-  (cesp--client-forward '((event . "handshake") (name . "Jaakko")) ))
+  (cesp--send '((event . "handshake") (name . "Jaakko")) ))
 
 (defun cesp-disconnect()
   "Disconnects Emacs from the Cesp server.
@@ -90,20 +90,44 @@ This will send a request_files event to the host.
 This function does not handle the response"
   (interactive)
   (if (and cesp-server-process (process-live-p cesp-server-process))
-	  (cesp--client-forward '((event . "request_files")))
+	  (cesp--send '((event . "request_files")))
 	(error "You are not connected to a server!")))
+
+(defun cesp-get-file(file)
+  "Sends a request to get FILE from the host's computer.
+
+This function may be used directly, or by cesp-browse-mode"
+  (interactive "sFile path: ")
+  (cesp--send `((event . "request_file") (path . ,file))))
 
 ;;; Internal functions
 
-(defun cesp--client-forward(json-object)
-  "Client sends the host a message formatted in Json.
-This sends JSON to the host from a client connection.
-Clients will only ever directly message the host.
+(defun cesp--send(json-object)
+  "Sends the server a message formatted in Json.
+This sends JSON to the Cesp server, which will then
+forward the message accordingly to other clients or
+the host.
 
 JSON is an object that is parsed by json-serialize
 into a string.
 "
   (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
+
+(defun cesp--get-files(dir)
+  "Returns a list containing file names, recursively."
+  (let ((file-list nil))
+	(dolist (entry (directory-files-and-attributes dir) nil)
+	  ;; Straight up ignore all hidden files, for now
+	  (if (not (equal (aref (car entry) 0) ?.))
+		  ;; If directory, recurse
+		  ;; (also make sure not to recurse . or .. :D )
+		  (if (and (car (cdr entry))
+				   (not (equal (car entry) "."))
+				   (not (equal (car entry) "..")))
+			  (setq file-list (append file-list (cesp--get-files (concat dir "/" (car entry)) )))
+			;; Otherwise, add to list
+			(setq file-list (cons (concat dir "/" (car entry)) file-list)))))
+	file-list))
 
 ;;;; Handlers
 
@@ -123,13 +147,22 @@ as appropriate."
 	 ((string= "response_files" event)
 	  ;; TODO: Check if already open, and if so, just update
 	  (cesp--open-file-manager (cdr (assoc 'files json)) )
-	  ))))
+	  )
+	 ((string= "response_file" event)
+	  (cesp--open-remote-file
+	   (cdr (assoc 'path json))
+	   (cdr (assoc 'content json))))
+	 ((string= "update_content" event)
+	  (cesp--update-content
+	   (cdr (assoc 'path json))
+	   (cdr (assoc 'changes json)))
+	 ))))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which handless statues changes in connection."
   (if (string= msg "connection broken by remote peer\n")
       (message (format "client %s has quit" proc))
-	(message msg)))
+	(message (concat "SENTINEL MESSAGE: "  msg))))
 
 (defun cesp--open-file-manager(files)
   "Handler function which opens a Cesp file browser.
@@ -158,6 +191,45 @@ FILES should be a list of file paths (strings).
 	  ;; I'm not sure where else to do this though, since it's
 	  ;; hard to pass the data to the major mode startup
 	  )))
+
+
+(defun cesp--open-remote-file(path content)
+  "Handler functon which opens a buffer with CONTENT.
+This will create a buffer with the Cesp minor mode
+instantiated, which means the buffers contents are
+synchronized across the Cesp server.
+
+If the buffer already exists, this will refresh the
+contents."
+  (switch-to-buffer (get-buffer-create path))
+  ;; Replace everything
+  (kill-region (point-min) (point-max))
+  (insert content))
+
+;; TODO: Make this actually work
+(defun cesp--update-content(path changes)
+  "Handler function which applies changes to a buffer.
+If the specified buffer is not currently open, then
+the changes are not applied.
+
+CHANGES is a alist with the changes specified as such:
+- first: First line (with 0 as the first line)
+- old_last: Last line I guess?
+- lines: List of lines the lines as they are now"
+  (if (equal (buffer-name) path) ;; If correct buffer
+	  (save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
+		(let ((beg (cdr (assoc 'first changes)) )
+			  (end (cdr (assoc 'old_last changes)) )
+			  (lines (cdr (assoc 'lines changes)) ))
+		  ;; Goto first line
+		  (goto-char (point-min))
+		  (forward-line beg)
+		  ;; Replace lines iteratively
+		  (dotimes (index (- end beg) nil)
+			(kill-line) ;; This only needs to run once BUT CLARITY FOR NOW
+			(insert (nth index lines)))
+		  ))))
+
 ;(cesp--open-file-manager (list "asdf" "moi"))
 ;;; _
 (provide 'cesp)
