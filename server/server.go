@@ -81,7 +81,7 @@ func (s *Server) run() {
 func (s *Server) handleConnection(conn net.Conn) {
 	client := &Client{
 		Conn: conn,
-		Send: make(chan []byte, 64),
+		Send: make(chan []byte, 1024),
 	}
 
 	// Joining
@@ -277,8 +277,8 @@ func (s *Server) sendJSON(client *Client, data map[string]any) {
 	bytes = append(bytes, '\n')
 	select {
 	case client.Send <- bytes:
-	default:
-		// Buffer full, dropping
+	case <-time.After(5 * time.Second):
+		log.Println("Client disconnected or slow, failed to send")
 	}
 }
 
