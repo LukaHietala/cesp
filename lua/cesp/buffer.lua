@@ -26,9 +26,7 @@ function M.apply_change(buf, change)
 	)
 	M.is_applying = false
 
-	if ok then
-		print("Applied pending changes automatically")
-	else
+	if not ok then
 		print("Error applying change: " .. tostring(err))
 	end
 end
@@ -49,6 +47,10 @@ function M.attach_buf_listener(buf, on_change)
 	end
 
 	local path = utils.get_rel_path(buf)
+	if not path then
+		print("Buffer outside project root, not applying listener")
+		return
+	end
 
 	-- Check for pending changes and apply them before attaching listener
 	-- This brings the buffer up to date with the server
@@ -58,6 +60,7 @@ function M.attach_buf_listener(buf, on_change)
 			M.apply_change(buf, change)
 		end
 		M.pending[path] = nil
+		print("Applied pending changes for " .. path)
 	end
 
 	vim.api.nvim_buf_attach(buf, false, {

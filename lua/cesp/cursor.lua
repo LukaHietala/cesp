@@ -1,3 +1,4 @@
+-- TODO!: Clean this mess
 local events = require("cesp.events")
 local utils = require("cesp.utils")
 local config = require("cesp.config").config
@@ -83,73 +84,62 @@ function M.handle_cursor_move(payload)
 	local row = payload.position[1] - 1
 	local col = payload.position[2]
 	local name = payload.name or "???"
-	local cursor_id = payload.from_id
+	-- Make ids positive, TODO: FIX THIS ON SERVER!!!
+	local cursor_id = payload.from_id + 1
 	local selection_id = payload.from_id + RANGE_ID_OFFSET
 
 	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_is_valid(buf) then
-			-- Clear cursor and selection
+			-- Always clear old marks in ALL buffers first
 			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, cursor_id)
 			pcall(vim.api.nvim_buf_del_extmark, buf, cursor_ns, selection_id)
-		end
-	end
 
-	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if
-			vim.api.nvim_buf_is_valid(buf)
-			and vim.api.nvim_buf_get_name(buf):find(payload.path, 1, true)
-		then
-			-- Draw the regular cursor
-			local cursor_opts = {
-				id = cursor_id,
-				hl_group = "TermCursor",
-				virt_text = { { " " .. name, config.cursor.hl_group } },
-				virt_text_pos = config.cursor.pos,
-				end_row = row,
-				end_col = col + 1, -- Highlight exactly one character
-				strict = false,
-			}
-			pcall(
-				vim.api.nvim_buf_set_extmark,
-				buf,
-				cursor_ns,
-				row,
-				col,
-				cursor_opts
-			)
-
-			-- If selection draw the range
-			if payload.selection then
-				local s_row = payload.selection.start_pos[1] - 1
-				local s_col = payload.selection.start_pos[2]
-
-				-- Normalize start/end for the extmark range logic
-				local start_r, start_c, end_r, end_c
-				if s_row < row or (s_row == row and s_col < col) then
-					start_r, start_c = s_row, s_col
-					end_r, end_c = row, col
-				else
-					start_r, start_c = row, col
-					end_r, end_c = s_row, s_col
-				end
-
-				local selection_opts = {
-					id = selection_id,
-					hl_group = "Visual",
-					end_row = end_r,
-					end_col = end_c,
+			-- Only draw if this buffer matches the remote path
+			if utils.get_rel_path(buf) == payload.path then
+				local cursor_opts = {
+					id = cursor_id,
+					hl_group = "TermCursor",
+					virt_text = { { " " .. name, config.cursor.hl_group } },
+					virt_text_pos = config.cursor.pos,
+					end_row = row,
+					end_col = col + 1,
 					strict = false,
 				}
 				pcall(
 					vim.api.nvim_buf_set_extmark,
 					buf,
 					cursor_ns,
-					start_r,
-					start_c,
-					selection_opts
+					row,
+					col,
+					cursor_opts
 				)
+
+				if payload.selection then
+					local s_row = payload.selection.start_pos[1] - 1
+					local s_col = payload.selection.start_pos[2]
+					local start_r, start_c, end_r, end_c =
+						s_row, s_col, row, col
+
+					if s_row > row or (s_row == row and s_col > col) then
+						start_r, start_c, end_r, end_c = row, col, s_row, s_col
+					end
+
+					pcall(
+						vim.api.nvim_buf_set_extmark,
+						buf,
+						cursor_ns,
+						start_r,
+						start_c,
+						{
+							id = selection_id,
+							hl_group = "Visual",
+							end_row = end_r,
+							end_col = end_c,
+							strict = false,
+						}
+					)
+				end
 			end
-			break
 		end
 	end
 end

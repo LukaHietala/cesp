@@ -32,7 +32,7 @@ function M.handle_event(json_str)
 
 	-- Received request for filetree
 	if payload.event == "request_files" then
-		local file_list = utils.get_files(".")
+		local file_list = utils.get_files()
 
 		M.send_event({
 			event = "response_files",
@@ -114,15 +114,12 @@ function M.handle_event(json_str)
 		end
 
 		vim.schedule(function()
-			-- Check if buffer exists and is currently loaded
-			local bufnr = vim.fn.bufnr(path)
-
-			if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
-				-- Apply immediately if "looking at it"
+			local bufnr = utils.find_buffer_by_rel_path(path)
+			if bufnr ~= nil and vim.api.nvim_buf_is_loaded(bufnr) then
+				-- If buffer is loaded apply directly
 				buffer.apply_change(bufnr, changes)
 			else
-				-- Otherwise queue it for when we open the file
-				-- TODO: Make diffing of pending changes
+				-- If the buffer isn't open, we store it in pending
 				buffer.add_pending(path, changes)
 			end
 		end)
@@ -131,13 +128,17 @@ function M.handle_event(json_str)
 
 	-- Event that contains client's cursor positions
 	if payload.event == "cursor_move" then
-		cursor.handle_cursor_move(payload)
+		vim.schedule(function()
+			cursor.handle_cursor_move(payload)
+		end)
 		return
 	end
 
 	-- Signals that client's cursor has scampered
 	if payload.event == "cursor_leave" then
-		cursor.handle_cursor_leave(payload)
+		vim.schedule(function()
+			cursor.handle_cursor_leave(payload)
+		end)
 		return
 	end
 

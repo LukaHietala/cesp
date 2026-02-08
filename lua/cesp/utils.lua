@@ -17,8 +17,8 @@ end
 -- Get all files recursively and return list of relative paths
 -- path/another_path/file.pl
 -- Uses depth-first search
-function M.get_files(root_path)
-	root_path = root_path or "."
+function M.get_files()
+	local root_path = vim.fs.normalize(M.get_project_root())
 	local files = {}
 	-- TODO: Add patterns to config
 	local ignore_patterns =
@@ -27,9 +27,18 @@ function M.get_files(root_path)
 	-- List of not looked directories
 	local stack = { root_path }
 
+	local function make_relative(full_path)
+		local rel = full_path:sub(#root_path + 1)
+		if rel:sub(1, 1) == "/" then
+			rel = rel:sub(2)
+		end
+		return rel
+	end
+
 	-- Returns true if file is in ignored patterns
 	local function is_ignored(path)
 		for _, pattern in ipairs(ignore_patterns) do
+			-- TODO?: Fix if too relaxed match
 			if path:match(pattern) then
 				return true
 			end
@@ -53,17 +62,16 @@ function M.get_files(root_path)
 				end
 			do
 				-- Clean up the path, no ./file.c
-				local rel_path = current_dir == "." and name
-					or (current_dir .. "/" .. name)
+				local full_path = vim.fs.joinpath(current_dir, name)
 
 				-- If file is not on the naughty list check it
-				if not is_ignored(rel_path) then
+				if not is_ignored(full_path) then
 					-- If dir add it to stack (will be processed later)
 					if type == "directory" then
-						table.insert(stack, rel_path)
+						table.insert(stack, full_path)
 					-- If file just add it to final "files"
 					elseif type == "file" then
-						table.insert(files, rel_path)
+						table.insert(files, make_relative(full_path))
 					end
 				end
 			end
@@ -94,57 +102,104 @@ function M.read_file(path)
 	return data
 end
 
--- Return relative path to CWD
-function M.get_rel_path(bufnr)
-	-- Get full path (/home/lentava_pomeranian/repos/hauva/src/main.c)
-	local full_path = vim.api.nvim_buf_get_name(bufnr or 0)
-	-- Return relative path to the CWD (src/main.c)
-	return vim.fn.fnamemodify(full_path, ":.")
+-- Get project root path, .git or cwd
+function M.get_project_root()
+	-- TODO: Move root markers to config
+	-- TODO: Maybe in checkhealth say what this is using? cwd or root marker
+	local root_markers = { ".git" }
+	local root = vim.fs.root(0, root_markers)
+	return root or vim.uv.cwd()
 end
 
--- Get actual current buffer content (open buffer/disk + pending)
+-- Robust check to ensure we don't return partial path matches
+function M.get_rel_path(bufnr)
+	-- Try to get full path
+	local full_path = vim.api.nvim_buf_get_name(bufnr or 0)
+	if full_path == "" then
+		return nil
+	end
+
+	local root = M.get_project_root()
+	-- Normalize and ensure trailing slashes
+	local abs_path = vim.fs.normalize(vim.fn.fnamemodify(full_path, ":p"))
+	local root_path = vim.fs.normalize(vim.fn.fnamemodify(root, ":p"))
+	-- Little trick that prevents this trying to match partial
+	-- file names /path/<dir_name_that_also_matches_filename_katti> ->
+	-- /path/<dir_name_that_also_matches_filename>/
+	if root_path:sub(-1) ~= "/" then
+		root_path = root_path .. "/"
+	end
+
+	-- Remove root path from result (cleaan and relative path)
+	if abs_path:sub(1, #root_path) == root_path then
+		return abs_path:sub(#root_path + 1)
+	end
+
+	-- Do not expose paths outside root
+	return nil
+end
+
+-- Find a buffer by its relative path
+function M.find_buffer_by_rel_path(rel_path)
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if
+			vim.api.nvim_buf_is_valid(buf)
+			and M.get_rel_path(buf) == rel_path
+		then
+			return buf
+		end
+	end
+	return nil
+end
+
+-- Get actual current buffer content
 function M.get_file_content(path)
 	local buffer_util = require("cesp.buffer")
-	local lines = {}
+	local pending = buffer_util.pending[path]
 
-	-- Try to get content from buffer
-	local bufnr = vim.fn.bufnr(vim.fn.fnameescape(path))
-	if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
-		-- Buffer is the most trustworthy source
-		lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	else
-		-- If buffer is not open fallback to disk
-		local content = M.read_file(path)
-		if content then
-			lines = vim.split(content, "\n", { plain = true })
+	-- If no pending changes return content directly
+	if not pending or #pending == 0 then
+		-- Try open buffer first
+		local bufnr = vim.fn.bufnr(vim.fn.fnameescape(path))
+		if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+			local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+			return table.concat(lines, "\n")
 		else
-			lines = {}
+			-- Disk read if no open buffer
+			return M.read_file(path)
 		end
 	end
 
-	-- Apply pending changes if they exits
-	local pending = buffer_util.pending[path]
-	if pending and #pending > 0 then
-		for _, change in ipairs(pending) do
-			local new_lines = {}
+	-- If there are  pending changes to merge
+	local lines = {}
+	local bufnr = vim.fn.bufnr(vim.fn.fnameescape(path))
 
-			-- Keep lines before the change
-			for i = 1, change.first do
-				table.insert(new_lines, lines[i] or "")
-			end
-
-			-- Add the new/changed lines
-			for _, line in ipairs(change.lines) do
-				table.insert(new_lines, line)
-			end
-
-			-- Keep lines after the change (skipping the old_last)
-			for i = change.old_last + 1, #lines do
-				table.insert(new_lines, lines[i])
-			end
-
-			lines = new_lines
+	-- Get base buffer to merge pending changes to
+	if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+		lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	else
+		local content = M.read_file(path)
+		if content then
+			lines = vim.split(content, "\n", { plain = true })
 		end
+	end
+
+	-- Apply pending changes
+	for _, change in ipairs(pending) do
+		local new_lines = {}
+		-- Keep lines before the change
+		for i = 1, change.first do
+			table.insert(new_lines, lines[i] or "")
+		end
+		-- Add the new/changed lines
+		for _, line in ipairs(change.lines) do
+			table.insert(new_lines, line)
+		end
+		-- Keep lines after the change (skipping the old_last)
+		for i = change.old_last + 1, #lines do
+			table.insert(new_lines, lines[i])
+		end
+		lines = new_lines
 	end
 
 	return table.concat(lines, "\n")
