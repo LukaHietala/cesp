@@ -46,11 +46,22 @@ local function on_read()
 end
 
 function M.start_client(ip)
+	if M.handle then
+		if not M.handle:is_closing() then
+			print("Already connected, try again") -- :katti:
+			return
+		else
+			-- Something probably went wrong so just reset the handle
+			M.handle = nil
+		end
+	end
+
 	M.handle = uv.new_tcp()
 
 	M.handle:connect(ip, config.port, function(err)
 		if err then
 			print(err)
+			M.handle = nil
 			return
 		end
 
