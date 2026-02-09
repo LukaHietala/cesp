@@ -40,7 +40,7 @@ function M.add_pending(path, change)
 end
 
 -- Opens menu of paths with pending changes
-function M.get_pending_paths()
+function M.list_pending_paths(on_select)
 	if next(M.pending) == nil then
 		print("No pending changes")
 		return
@@ -57,9 +57,32 @@ function M.get_pending_paths()
 		kind = "file",
 	}, function(choice)
 		if choice then
-			print(choice)
+			on_select(choice)
 		end
 	end)
+end
+
+-- Opens buffer for comparing pending to disk in diff
+function M.open_pending_diff(path)
+	local buf = vim.api.nvim_create_buf(true, true)
+	pcall(vim.api.nvim_buf_set_name, buf, path .. " [pending]")
+	local disk_content = utils.read_file(path)
+	-- This does more than just getting pending content
+	-- but ensures that latest version is obtained
+	local pending_content = utils.get_file_content(path)
+
+	-- Create diff
+	local diff_text = vim.diff(disk_content, pending_content, {
+		result_type = "unified",
+		ctxlen = 3,
+	})
+
+	-- Add diff to buffer
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(diff_text, "\n"))
+
+	-- Set buf filetype to "diff" to get syntax highlight
+	vim.bo[buf].filetype = "diff"
+	vim.api.nvim_set_current_buf(buf)
 end
 
 -- Listen for buffer line changes
