@@ -48,6 +48,16 @@ you are editing with them"
 This is the process object that represents
 the connection to the tcp server")
 
+(defvar cesp-cursors
+  nil
+  "An alist of other peoples cursors.
+Cursors are overlays.
+These will be shown, if you are in the
+corresponding buffer.
+
+Format is:
+  (id . (col row buffer) )")
+
 ;;; Public commands
 
 ;;;; Connection management
@@ -155,8 +165,13 @@ as appropriate."
 	 ((string= "update_content" event)
 	  (cesp--update-content
 	   (cdr (assoc 'path json))
-	   (cdr (assoc 'changes json)))
-	 ))))
+	   (cdr (assoc 'changes json))))
+	 ((string= "cursor_move" event)
+	  (cesp--render-cursor
+	   (cdr (assoc 'from_id json))
+	   (cdr (assoc 'position json))
+	   (cdr (assoc 'path json))))
+	)))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which handless statues changes in connection."
@@ -170,8 +185,7 @@ This will open a new window in cesp-browse-mode, where you
 can browse files on the host's computer, and open them in
 new buffers
 
-FILES should be a list of file paths (strings).
-"
+FILES should be a list of file paths (strings)."
   (let (
 		(file-window  (split-window-horizontally))
 		)
@@ -205,6 +219,23 @@ contents."
   ;; Replace everything
   (kill-region (point-min) (point-max))
   (insert content))
+
+(defun cesp--render-cursor(id position buffer)
+  "Renders cursor ID at POSITION in BUFFER.
+ID is unique id for cursor, POSITION is a list
+with a column and row."
+  (let* ((pos (save-excursion ;; Get pos from column and row
+				  (goto-char (point-min))
+				  (forward-line (car position))
+				  (forward-char (car (cdr position)))
+				  (point)))
+		 (overlay (or (cdr (assoc id cesp-cursors))
+					  (let ((o (make-overlay pos (1+ pos) buffer)))
+						(overlay-put o 'face 'cursor)
+						(setq cesp-cursors (cons `(,id . ,o)  cesp-cursors))
+						o))))
+	(move-overlay overlay pos (1+ pos))))
+	
 
 ;; TODO: Make this actually work
 (defun cesp--update-content(path changes)
