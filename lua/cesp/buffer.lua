@@ -134,10 +134,38 @@ function M.review_pending()
 			print("Applied changes to " .. path)
 			process_next(index + 1)
 		elseif char == "d" then
-			-- Discard changes
-			-- TODO: Host and client get out of sync here, force sync
+			-- Disard changes
+			-- This also send full content as update_content so
+			-- clients don't go out of sync
+
+			-- Used for old_last
+			local remote_line_count = #vim.split(
+				utils.get_file_content(path, M.pending[path]) or "",
+				"\n"
+			)
+
 			M.pending[path] = nil
-			print("Discarded changes for " .. path)
+
+			-- Get the truth from disk
+			local abs_path = utils.get_abs_path(path)
+			local disk_text = utils.read_file(abs_path)
+
+			if disk_text then
+				local disk_lines = vim.split(disk_text, "\n")
+
+				local events = require("cesp.events")
+				events.send_event({
+					event = "update_content",
+					path = path,
+					changes = {
+						first = 0,
+						old_last = remote_line_count,
+						lines = disk_lines,
+					},
+				})
+				print("Discarded changes for " .. path)
+			end
+
 			process_next(index + 1)
 		elseif char == "n" then
 			-- Skip change
