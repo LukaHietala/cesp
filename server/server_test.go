@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,12 @@ func startTestServer() (*Server, string) {
 		}
 	}()
 	return server, listener.Addr().String()
+}
+
+func TestMain(m *testing.M) {
+	// Discard logs
+	log.SetOutput(io.Discard)
+	os.Exit(m.Run())
 }
 
 func TestValidHandshake(t *testing.T) {
