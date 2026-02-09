@@ -31,7 +31,7 @@ function M.apply_change(buf, change)
 	end
 end
 
--- Adds changes to pending. Happens if host doesn't have same buffer open
+-- Adds changes to pending
 function M.add_pending(path, change)
 	if not M.pending[path] then
 		M.pending[path] = {}
@@ -41,13 +41,17 @@ end
 
 -- Opens diff between disk and pending content
 function M.open_pending_diff(path)
+	-- Get disk content
 	local abs_path = utils.get_abs_path(path)
 	local disk_content = utils.read_file(abs_path)
+	-- Get pending content (to compare)
 	local pending_content = utils.get_file_content(path, M.pending[path])
 
+	-- Create diff buffer
 	local buf = vim.api.nvim_create_buf(true, true)
 	pcall(vim.api.nvim_buf_set_name, buf, path .. " (pending)")
 
+	-- Get diff content (just unified for now)
 	local diff_text = vim.text.diff(disk_content or "", pending_content, {
 		result_type = "unified",
 		ctxlen = 3,
@@ -147,6 +151,7 @@ function M.review_pending()
 			M.pending[path] = nil
 
 			-- Get the truth from disk
+			-- TODO: Make this a utility
 			local abs_path = utils.get_abs_path(path)
 			local disk_text = utils.read_file(abs_path)
 
@@ -190,6 +195,7 @@ function M.attach_buf_listener(buf, on_change)
 		return
 	end
 
+	-- Get buffer with relative path
 	local path = utils.get_rel_path(buf)
 	if not path then
 		print("Buffer outside project root, not applying listener")
@@ -200,6 +206,9 @@ function M.attach_buf_listener(buf, on_change)
 	-- This brings the buffer up to date with the server
 	if M.pending[path] then
 		local changes = M.pending[path]
+		-- Applies change one by one
+		-- This is little inefficient, but neovim can take care of
+		-- it very fast so it rarely becomes a bottleneck
 		for _, change in ipairs(changes) do
 			M.apply_change(buf, change)
 		end
