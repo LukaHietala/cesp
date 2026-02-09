@@ -148,6 +148,7 @@ function M.get_rel_path(bufnr)
 end
 
 -- Gets absolute path from project relative path
+-- USE THIS FOR CRITICAL THINGS!
 function M.get_abs_path(path)
 	return vim.fs.normalize(vim.fs.joinpath(M.get_project_root(), path))
 end
@@ -187,25 +188,30 @@ function M.get_file_content(path, pending_changes)
 	end
 
 	-- Apply pending changes
-	local result = vim.deepcopy(lines)
+	-- Using neovim's own buffers for this to be more safe and...
+	-- BLAZINGLY FAST (optimized c)
+
+	-- Create temp buf to apply changes to
+	local temp_buf = vim.api.nvim_create_buf(false, true)
+	-- Set base lines (disk)
+	vim.api.nvim_buf_set_lines(temp_buf, 0, -1, false, lines)
+
+	-- Merge pending changes
 	for _, change in ipairs(pending_changes) do
-		local new_result = {}
-		-- Keep lines before the change
-		for i = 1, change.first do
-			table.insert(new_result, result[i] or "")
-		end
-		-- Add the new/changed lines
-		for _, l in ipairs(change.lines) do
-			table.insert(new_result, l)
-		end
-		-- Keep lines after the change (skipping the old_last)
-		for i = change.old_last + 1, #result do
-			table.insert(new_result, result[i])
-		end
-		result = new_result
+		vim.api.nvim_buf_set_lines(
+			temp_buf,
+			change.first,
+			change.old_last,
+			false,
+			change.lines
+		)
 	end
 
-	return table.concat(result, "\n")
+	-- Get end result and cleanup
+	local result_lines = vim.api.nvim_buf_get_lines(temp_buf, 0, -1, false)
+	vim.api.nvim_buf_delete(temp_buf, { force = true })
+
+	return table.concat(result_lines, "\n")
 end
 
 return M

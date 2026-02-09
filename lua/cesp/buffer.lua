@@ -46,7 +46,7 @@ function M.open_pending_diff(path)
 	local pending_content = utils.get_file_content(path, M.pending[path])
 
 	local buf = vim.api.nvim_create_buf(true, true)
-	pcall(vim.api.nvim_buf_set_name, buf, path .. " [pending]")
+	pcall(vim.api.nvim_buf_set_name, buf, path .. " (pending)")
 
 	local diff_text = vim.text.diff(disk_content or "", pending_content, {
 		result_type = "unified",
