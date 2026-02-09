@@ -56,7 +56,7 @@ These will be shown, if you are in the
 corresponding buffer.
 
 Format is:
-  (id . (col row buffer) )")
+  (id . overlay )")
 
 ;;; Public commands
 
@@ -71,16 +71,19 @@ which is the default for a Cesp server.
 It will then perform the handshake, giving your
 name as per the variable"
   (interactive "sServer hostname: \nsServer port: ")
-  (setq cesp-server-process (make-network-process
-   :name "cesp-process"
-   :buffer (get-buffer-create "*cesp*") ;; Don't think this does anything
-   :host host
-   :service port
-   :family 'ipv4 ;; TODO: Support for ipv6
-   :filter 'cesp--filter
-   :sentinel 'cesp--sentinel))
-  ;; Perform handshake
-  (cesp--send '((event . "handshake") (name . "Jaakko")) ))
+  (if (or (not cesp-server-process) (not (process-live-p cesp-server-process)))
+	  (progn
+		(setq cesp-server-process (make-network-process
+								 :name "cesp-process"
+								 :buffer (get-buffer-create "*cesp*") ;; Don't think this does anything
+								 :host host
+								 :service port
+								 :family 'ipv4 ;; TODO: Support for ipv6
+								 :filter 'cesp--filter
+								 :sentinel 'cesp--sentinel))
+		;; Perform handshake
+		(cesp--send '((event . "handshake") (name . "Jaakko")) ))
+	(error "You are already connected to a server!")))
 
 (defun cesp-disconnect()
   "Disconnects Emacs from the Cesp server.
@@ -170,7 +173,8 @@ as appropriate."
 	  (cesp--render-cursor
 	   (cdr (assoc 'from_id json))
 	   (cdr (assoc 'position json))
-	   (cdr (assoc 'path json))))
+	   (cdr (assoc 'path json))
+	   (cdr (assoc 'name json))))
 	)))
 
 (defun cesp--sentinel(proc msg)
@@ -220,22 +224,27 @@ contents."
   (kill-region (point-min) (point-max))
   (insert content))
 
-(defun cesp--render-cursor(id position buffer)
+(defun cesp--render-cursor(id position buffer name)
   "Renders cursor ID at POSITION in BUFFER.
 ID is unique id for cursor, POSITION is a list
-with a column and row."
-  (let* ((pos (save-excursion ;; Get pos from column and row
-				  (goto-char (point-min))
-				  (forward-line (car position))
-				  (forward-char (car (cdr position)))
-				  (point)))
-		 (overlay (or (cdr (assoc id cesp-cursors))
-					  (let ((o (make-overlay pos (1+ pos) buffer)))
-						(overlay-put o 'face 'cursor)
-						(setq cesp-cursors (cons `(,id . ,o)  cesp-cursors))
-						o))))
-	(move-overlay overlay pos (1+ pos))))
-	
+with a column and row. NAME is rendered next to the
+cursor.
+The cursor is not rendered if you are not in the correct
+buffer."
+  (let ((buf (get-buffer buffer)))
+	(if buf
+		(let* ((pos (save-excursion ;; Get pos from column and row
+					  (goto-char (point-min))
+					  (forward-line (1- (car position)))
+					  (forward-char (car (cdr position)))
+					  (point)))
+			   (overlay (or (cdr (assoc id cesp-cursors))
+							(let ((o (make-overlay pos (1+ pos) buf)))
+							  (overlay-put o 'face 'cursor)
+							  (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
+							  o))))
+		  ;; Update values
+		  (move-overlay overlay pos (1+ pos) buf)))))
 
 ;; TODO: Make this actually work
 (defun cesp--update-content(path changes)
