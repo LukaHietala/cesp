@@ -214,4 +214,16 @@ function M.get_file_content(path, pending_changes)
 	return table.concat(result_lines, "\n")
 end
 
+-- Returns buffer's SHA256 content hash
+function M.get_buf_sha256(buf)
+	if not vim.api.nvim_buf_is_valid(buf) then
+		return nil
+	end
+
+	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+	local content = table.concat(lines, "\n")
+
+	return vim.fn.sha256(content)
+end
+
 return M
