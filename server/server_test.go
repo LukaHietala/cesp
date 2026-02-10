@@ -43,7 +43,7 @@ func TestValidHandshake(t *testing.T) {
 	fmt.Fprintln(conn, `{"event": "handshake", "name": "Kiltti pomeranian"}`)
 
 	reply, _ := bufio.NewReader(conn).ReadString('\n')
-	if !strings.Contains(reply, "user_joined") {
+	if !strings.Contains(reply, "handshake_response") {
 		t.Fatalf("Expected user_joined event, got: %s", reply)
 	}
 }

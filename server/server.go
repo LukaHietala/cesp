@@ -170,8 +170,16 @@ func (s *Server) handleHandshake(client *Client, msg map[string]any) {
 	newName, _ := msg["name"].(string)
 	if newName != "" && client.Name == "" {
 		client.Name = newName
-		s.broadcast(-1, map[string]any{
-			"event": "user_joined", "id": client.ID,
+		s.broadcast(client.ID, map[string]any{
+			"event":   "user_joined",
+			"id":      client.ID,
+			"name":    client.Name,
+			"is_host": client.IsHost,
+		})
+		// Send info about server state on client
+		s.sendJSON(client, map[string]any{
+			"event":   "handshake_response",
+			"id":      client.ID,
 			"name":    client.Name,
 			"is_host": client.IsHost,
 		})
