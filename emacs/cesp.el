@@ -142,6 +142,18 @@ into a string.
 			(setq file-list (cons (concat dir "/" (car entry)) file-list)))))
 	file-list))
 
+(defun cesp--send-update(beg end len)
+  "Sends an update_content event when buffer is updated."
+  (let ((lines (vconcat (split-string (buffer-substring-no-properties beg end) "
+" t))) ;; Newline regex
+		(first (line-number-at-pos beg))
+		(old_last (line-number-at-pos end)))
+	(cesp--send `((event . "update_content") (path . ,(buffer-name))
+				  (changes . ((first . ,first) (old_last . ,old_last) (lines . ,lines))) ))))
+
+(remove-hook 'after-change-functions 'cesp--send-update)
+(add-hook 'after-change-functions 'cesp--send-update)
+  
 ;;;; Handlers
 
 (defun cesp--filter(proc msg)
