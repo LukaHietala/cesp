@@ -1,7 +1,6 @@
 local uv = vim.uv or vim.loop
 local cursor = require("cesp.cursor")
 local events = require("cesp.events")
-local config = require("cesp.config").config
 
 local M = {}
 M.handle = nil
@@ -58,6 +57,7 @@ function M.start_client(ip, is_host)
 
 	M.handle = uv.new_tcp()
 
+	local config = require("cesp.config").config
 	M.handle:connect(ip, config.port, function(err)
 		if err then
 			print(err)

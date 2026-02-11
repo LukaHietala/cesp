@@ -1,6 +1,5 @@
 local events = require("cesp.events")
 local utils = require("cesp.utils")
-local config = require("cesp.config").config
 
 local M = {}
 
@@ -100,6 +99,7 @@ function M.handle_cursor_move(payload)
 
 	-- Find the specific buffer this cursor belongs to
 	local target_buf = utils.find_buffer_by_rel_path(payload.path)
+	local config = require("cesp.config").config
 
 	-- Iterate all buffers to ensure we clear ghosts from previous files
 	-- while updating the correct file
