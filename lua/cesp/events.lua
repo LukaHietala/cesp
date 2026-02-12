@@ -159,15 +159,33 @@ function M.handle_event(json_str)
 
 		vim.schedule(function()
 			local bufnr = utils.find_buffer_by_rel_path(path)
-			if bufnr ~= nil and vim.api.nvim_buf_is_loaded(bufnr) then
-				-- If buffer is loaded apply directly
+
+			-- Default to false if not found
+			local is_visible = false
+			local is_loaded = false
+
+			if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+				is_loaded = vim.api.nvim_buf_is_loaded(bufnr)
+				-- Check if any window is currently displaying this buffer
+				local wins = vim.fn.win_findbuf(bufnr)
+				is_visible = (wins and #wins > 0)
+			end
+
+			if is_visible then
+				-- If buffer is on screen, apply live
 				buffer.apply_change(bufnr, changes)
-			else
-				-- If the buffer isn't open, we store it in pending
-				-- Only create pending chages for host
-				if M.state.is_host then
-					buffer.add_pending(path, changes)
+			elseif M.state.is_host then
+				-- If buffer is hidden/not open on host apply pending
+				buffer.add_pending(path, changes)
+				-- Little hacky, but if host goes back to "hidden"
+				-- buffer it will be out of sync if pending changes were not
+				-- applied
+				if is_loaded then
+					buffer.apply_change(bufnr, changes)
 				end
+			elseif is_loaded then
+				-- Keep every client buffer on sync
+				buffer.apply_change(bufnr, changes)
 			end
 		end)
 		return

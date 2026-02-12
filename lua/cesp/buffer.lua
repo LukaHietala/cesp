@@ -135,6 +135,15 @@ function M.review_pending()
 			local final_content = utils.get_file_content(path, M.pending[path])
 			utils.write_file(path, final_content)
 			M.pending[path] = nil
+
+			-- Also update the loaded buffer if it exists, otherwise neovim
+			-- will complain that the file changed on disk :D
+			local bufnr = utils.find_buffer_by_rel_path(path)
+			if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
+				local new_lines = vim.split(final_content, "\n")
+				vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+			end
+
 			print("Applied changes to " .. path)
 			process_next(index + 1)
 		elseif char == "d" then
@@ -157,6 +166,12 @@ function M.review_pending()
 
 			if disk_text then
 				local disk_lines = vim.split(disk_text, "\n")
+
+				-- Keep host's buffers in sync as well
+				local bufnr = utils.find_buffer_by_rel_path(path)
+				if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
+					vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, disk_lines)
+				end
 
 				local events = require("cesp.events")
 				events.send_event({
