@@ -167,44 +167,21 @@ function M.handle_event(json_str)
 		local path = payload.path
 		local changes = payload.changes
 
-		if not path or not changes then
-			return
-		end
-
 		vim.schedule(function()
 			local bufnr = utils.find_buffer_by_rel_path(path)
+			local is_loaded = bufnr
+				and vim.api.nvim_buf_is_valid(bufnr)
+				and vim.api.nvim_buf_is_loaded(bufnr)
 
-			-- Default to false if not found
-			local is_visible = false
-			local is_loaded = false
-
-			if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-				is_loaded = vim.api.nvim_buf_is_loaded(bufnr)
-				-- Check if any window is currently displaying this buffer
-				local wins = vim.fn.win_findbuf(bufnr)
-				is_visible = (wins and #wins > 0)
-			end
-
-			if is_visible then
-				-- If buffer is on screen, apply live
+			-- Apply directly if loaded, add to pending if not
+			if is_loaded then
 				buffer.apply_change(bufnr, changes)
 			elseif M.state.is_host then
-				-- If buffer is hidden/not open on host apply pending
 				buffer.add_pending(path, changes)
-				-- Little hacky, but if host goes back to "hidden"
-				-- buffer it will be out of sync if pending changes were not
-				-- applied
-				if is_loaded then
-					buffer.apply_change(bufnr, changes)
-				end
-			elseif is_loaded then
-				-- Keep every client buffer on sync
-				buffer.apply_change(bufnr, changes)
 			end
 		end)
 		return
 	end
-
 	-- Event that contains client's cursor positions
 	if payload.event == "cursor_move" then
 		vim.schedule(function()
