@@ -7,6 +7,6 @@ Not all editors will work 100% the same, but Cesp should guarantee data integrit
 | Editor | Status |
 | ------ | ------- |
 | Neovim | Basic features work |
-| Emacs  | Basis exists, doesn't really work yet though |
+| Emacs  | Basis exists, currently only able to properly observe changes |
 | Vscode | Someday |
 | Vim    | Possibly someday |
