@@ -61,7 +61,6 @@ function M.handle_event(json_str)
 		end
 
 		-- If new host is self update state
-		-- TODO: left message hides these messages, FIX
 		if payload.host_id == M.state.id then
 			print("You're the new host!")
 			M.state.is_host = true
@@ -105,13 +104,11 @@ function M.handle_event(json_str)
 
 	-- Received request for spesific file contents
 	if payload.event == "request_file" then
-		-- Get content from open buffer, if no open buffer then pending, and if no
-		-- pending then disk
-		local buffer_util = require("cesp.buffer")
-		local content = utils.get_file_content(
-			payload.path,
-			buffer_util.pending[payload.path]
-		)
+		if M.state.is_host then
+			utils.ensure_host_buffer(payload.path)
+		end
+		-- Get content from open buffer or disk
+		local content = utils.get_file_content(payload.path)
 
 		-- Don't send an empty file
 		if not content then
@@ -132,7 +129,6 @@ function M.handle_event(json_str)
 		local content = payload.content
 		local path = payload.path
 
-		-- Should not be possible, but never can be too safe :D
 		if not content then
 			print("No content from " .. path)
 		end
@@ -154,8 +150,6 @@ function M.handle_event(json_str)
 					M.send_event({
 						event = "remote_write",
 						path = path,
-						-- Host applies it own content, that miiight be synced currectly
-						-- Clients can't be trusted >:(
 					})
 				end,
 			})
@@ -169,19 +163,22 @@ function M.handle_event(json_str)
 
 		vim.schedule(function()
 			local bufnr = utils.find_buffer_by_rel_path(path)
-			local is_loaded = bufnr
+
+			if M.state.is_host then
+				bufnr = utils.ensure_host_buffer(path)
+			end
+
+			if
+				bufnr
 				and vim.api.nvim_buf_is_valid(bufnr)
 				and vim.api.nvim_buf_is_loaded(bufnr)
-
-			-- Apply directly if loaded, add to pending if not
-			if is_loaded then
+			then
 				buffer.apply_change(bufnr, changes)
-			elseif M.state.is_host then
-				buffer.add_pending(path, changes)
 			end
 		end)
 		return
 	end
+
 	-- Event that contains client's cursor positions
 	if payload.event == "cursor_move" then
 		vim.schedule(function()
@@ -224,21 +221,13 @@ function M.handle_event(json_str)
 			return
 		end
 
-		local path = payload.path
-		local requestor_name = payload.name or "???"
-
 		if not M.allow_remote_write then
 			return
 		end
 
-		-- Get content from host's own buffer
-		-- No trusting clients here
+		local path = payload.path
+		local requestor_name = payload.name or "???"
 		local bufnr = utils.find_buffer_by_rel_path(path)
-		local buffer_util = require("cesp.buffer")
-
-		-- This feature is really dangereous and clunky, so it might get removed
-		-- File might get messed up if host buffer gets out of sync or something else
-		-- weird happens
 
 		-- If buffer is open/valid/loaded :kisumirri:
 		if
@@ -247,28 +236,12 @@ function M.handle_event(json_str)
 			and vim.api.nvim_buf_is_loaded(bufnr)
 		then
 			vim.api.nvim_buf_call(bufnr, function()
-				-- Maybe noautocmd later?
-				vim.cmd("write")
+				vim.cmd("silent! write")
 			end)
-
-			-- Clear pending as they are now committed via the write
-			buffer_util.pending[path] = nil
+			print(requestor_name .. " wrote to " .. path)
 		else
-			-- Buffer is not open
-			local content =
-				utils.get_file_content(path, buffer_util.pending[path])
-
-			if content then
-				-- Standard write
-				utils.write_file(path, content)
-				buffer_util.pending[path] = nil
-
-				print(requestor_name .. " wrote to " .. path)
-			else
-				print("Failed to save " .. path .. " (no content?)")
-			end
+			print("Failed to save " .. path .. " (buffer not loaded on host)")
 		end
-
 		return
 	end
 

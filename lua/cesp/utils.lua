@@ -15,8 +15,6 @@ function M.encode_json(ltable)
 end
 
 -- Get all files recursively and return list of relative paths
--- path/another_path/file.pl
--- Uses depth-first search
 function M.get_files()
 	local root_path = vim.fs.normalize(M.get_project_root())
 	local files = {}
@@ -38,7 +36,6 @@ function M.get_files()
 	-- Returns true if file is in ignored patterns
 	local function is_ignored(path)
 		for _, pattern in ipairs(ignore_patterns) do
-			-- TODO?: Fix if too relaxed match
 			if path:match(pattern) then
 				return true
 			end
@@ -46,30 +43,21 @@ function M.get_files()
 		return false
 	end
 
-	-- TODO: Add max depth
 	while #stack > 0 do
-		-- Pops directory out of the stack
 		local current_dir = table.remove(stack)
-		-- Open the popped directory
 		local scanner = uv.fs_scandir(current_dir)
 
-		-- Iterate the each directory
 		if scanner then
 			for name, type in
-				-- Move to next
 				function()
 					return uv.fs_scandir_next(scanner)
 				end
 			do
-				-- Clean up the path, no ./file.c
 				local full_path = vim.fs.joinpath(current_dir, name)
 
-				-- If file is not on the naughty list check it
 				if not is_ignored(full_path) then
-					-- If dir add it to stack (will be processed later)
 					if type == "directory" then
 						table.insert(stack, full_path)
-					-- If file just add it to final "files"
 					elseif type == "file" then
 						table.insert(files, make_relative(full_path))
 					end
@@ -112,14 +100,11 @@ end
 
 -- Get project root path, .git or cwd
 function M.get_project_root()
-	-- TODO: Move root markers to config
-	-- TODO: Maybe in checkhealth say what this is using? cwd or root marker
 	local root_markers = { ".git" }
 	local root = vim.fs.root(0, root_markers)
 	return root or vim.uv.cwd()
 end
 
--- Robust check to ensure we don't return partial path matches
 function M.get_rel_path(bufnr)
 	-- Try to get full path
 	local full_path = vim.api.nvim_buf_get_name(bufnr or 0)
@@ -131,9 +116,7 @@ function M.get_rel_path(bufnr)
 	-- Normalize and ensure trailing slashes
 	local abs_path = vim.fs.normalize(vim.fn.fnamemodify(full_path, ":p"))
 	local root_path = vim.fs.normalize(vim.fn.fnamemodify(root, ":p"))
-	-- Little trick that prevents this trying to match partial
-	-- file names /path/<dir_name_that_also_matches_filename_katti> ->
-	-- /path/<dir_name_that_also_matches_filename>/
+
 	if root_path:sub(-1) ~= "/" then
 		root_path = root_path .. "/"
 	end
@@ -148,7 +131,6 @@ function M.get_rel_path(bufnr)
 end
 
 -- Gets absolute path from project relative path
--- USE THIS FOR CRITICAL THINGS!
 function M.get_abs_path(path)
 	return vim.fs.normalize(vim.fs.joinpath(M.get_project_root(), path))
 end
@@ -166,53 +148,36 @@ function M.find_buffer_by_rel_path(rel_path)
 	return nil
 end
 
-function M.get_file_content(path, pending_changes)
-	local abs_path = M.get_abs_path(path)
-
-	local lines = {}
+-- Gets content straight from loaded buffer, or disk if not loaded
+function M.get_file_content(path)
 	local bufnr = M.find_buffer_by_rel_path(path)
 
-	-- Get base content
 	if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
-		lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	else
-		local content = M.read_file(abs_path)
-		if content then
-			lines = vim.split(content, "\n", { trimempty = false })
-		end
-	end
-
-	--If no pending changes provided, return base content
-	if not pending_changes or #pending_changes == 0 then
+		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 		return table.concat(lines, "\n")
 	end
 
-	-- Apply pending changes
-	-- Using neovim's own buffers for this to be more safe and...
-	-- BLAZINGLY FAST (optimized c)
+	local abs_path = M.get_abs_path(path)
+	return M.read_file(abs_path)
+end
 
-	-- Create temp buf to apply changes to
-	local temp_buf = vim.api.nvim_create_buf(false, true)
-	-- Set base lines (disk)
-	vim.api.nvim_buf_set_lines(temp_buf, 0, -1, false, lines)
+-- Adds buffer, makes it listed for :wa, and bypasses swapfile prompts
+function M.ensure_host_buffer(rel_path)
+	local bufnr = M.find_buffer_by_rel_path(rel_path)
+	if not bufnr or not vim.api.nvim_buf_is_loaded(bufnr) then
+		local abs_path = M.get_abs_path(rel_path)
+		bufnr = vim.fn.bufadd(abs_path)
 
-	-- Merge pending changes (reverse to keep indexes right)
-	for i = #pending_changes, 1, -1 do
-		local change = pending_changes[i]
-		vim.api.nvim_buf_set_lines(
-			temp_buf,
-			change.first,
-			change.old_last,
-			false,
-			change.lines
-		)
+		vim.bo[bufnr].buflisted = true
+
+		-- Temporarily ignore swapfile prompts for background loading
+		-- Magic
+		local old_shm = vim.o.shortmess
+		vim.o.shortmess = old_shm .. "A" --shm-a
+		vim.fn.bufload(bufnr)
+		vim.o.shortmess = old_shm
 	end
-
-	-- Get end result and cleanup
-	local result_lines = vim.api.nvim_buf_get_lines(temp_buf, 0, -1, false)
-	vim.api.nvim_buf_delete(temp_buf, { force = true })
-
-	return table.concat(result_lines, "\n")
+	return bufnr
 end
 
 -- Returns buffer's SHA256 content hash

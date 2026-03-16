@@ -1,5 +1,4 @@
 local browser = require("cesp.browser")
-local buffer = require("cesp.buffer")
 local events = require("cesp.events")
 local network = require("cesp.network")
 
@@ -23,7 +22,7 @@ function M.setup(opts)
 			local is_host = (choice == "Host")
 			if is_host then
 				vim.ui.select({ "Yes", "No" }, {
-					prompt = "Allow clients to save files on your machine (:w)? (dangerous)",
+					prompt = "Allow clients to save files on your machine (:w)?",
 				}, function(allow_write)
 					if not allow_write then
 						print("Join cancelled")
@@ -31,7 +30,6 @@ function M.setup(opts)
 					end
 
 					events.allow_remote_write = (allow_write == "Yes")
-
 					network.start_client(ip, is_host)
 				end)
 			else
@@ -55,14 +53,6 @@ function M.setup(opts)
 			return
 		end
 		browser.list_remote_files()
-	end, {})
-
-	vim.api.nvim_create_user_command("CespPending", function()
-		if not events.state.is_host then
-			print("For host only")
-			return
-		end
-		buffer.review_pending()
 	end, {})
 
 	vim.api.nvim_create_autocmd("VimLeavePre", {

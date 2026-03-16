@@ -2,20 +2,22 @@ local M = {}
 
 -- List of buffer that have nvim_buf listener
 M.attached = {}
--- True if buffer changes are happening
-M.is_applying = false
--- List of pending changes from other clients on non-open buffers
-M.pending = {}
+-- Apply locks
+M.is_applying = {}
 
 local utils = require("cesp.utils")
 
--- Applies a single change object to a buffer
+-- Applies a single change to a buffer
 function M.apply_change(buf, change)
 	if not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
 
-	M.is_applying = true
+	if not vim.api.nvim_buf_is_loaded(buf) then
+		return
+	end
+
+	M.is_applying[buf] = true
 	local ok, err = pcall(
 		vim.api.nvim_buf_set_lines,
 		buf,
@@ -24,217 +26,28 @@ function M.apply_change(buf, change)
 		false,
 		change.lines
 	)
-	M.is_applying = false
+	M.is_applying[buf] = false
 
 	if not ok then
 		print("Error applying change: " .. tostring(err))
 	end
 end
 
--- Adds changes to pending
-function M.add_pending(path, change)
-	if not M.pending[path] then
-		M.pending[path] = {}
-	end
-	table.insert(M.pending[path], change)
-end
-
--- Opens diff between disk and pending content
-function M.open_pending_diff(path)
-	-- Get disk content
-	local abs_path = utils.get_abs_path(path)
-	local disk_content = utils.read_file(abs_path)
-	-- Get pending content (to compare)
-	local pending_content = utils.get_file_content(path, M.pending[path])
-
-	-- Create diff buffer
-	local buf = vim.api.nvim_create_buf(true, true)
-	pcall(vim.api.nvim_buf_set_name, buf, path .. " (pending)")
-
-	-- Get diff content (just unified for now)
-	local diff_text = vim.text.diff(disk_content or "", pending_content, {
-		result_type = "unified",
-		ctxlen = 3,
-	})
-
-	if diff_text == "" then
-		diff_text = "No changes"
-	end
-
-	vim.api.nvim_buf_set_lines(
-		buf,
-		0,
-		-1,
-		false,
-		vim.split(tostring(diff_text), "\n")
-	)
-
-	vim.bo[buf].filetype = "diff"
-	vim.bo[buf].buftype = "nofile"
-
-	vim.api.nvim_set_current_buf(buf)
-
-	return buf
-end
-
-function M.review_pending()
-	-- Get all pending change paths
-	local paths = {}
-	for path, _ in pairs(M.pending) do
-		table.insert(paths, path)
-	end
-	table.sort(paths)
-
-	if #paths == 0 then
-		print("No pending changes")
-		return
-	end
-
-	-- Start iterating through paths
-	local function process_next(index)
-		if index > #paths then
-			print("Finished reviewing pending changes")
-			return
-		end
-
-		-- Open current path diff view
-		local path = paths[index]
-		local buf = M.open_pending_diff(path)
-
-		-- Force to show diff (won't work without this)
-		vim.cmd("redraw")
-
-		-- List actions on cmdline
-		print(
-			string.format(
-				"Reviewing %s (%d/%d): [a]pply, [d]iscard, [n]ext, [q]uit",
-				path,
-				index,
-				#paths
-			)
-		)
-
-		-- Get keycode to base action on
-		local ok, char_code = pcall(vim.fn.getchar)
-		if not ok then
-			return
-		end
-		-- TODO: fix if misbehaves
-		---@diagnostic disable-next-line: param-type-mismatch
-		local char = vim.fn.nr2char(char_code)
-
-		vim.cmd("normal! :")
-
-		-- Delete the buffer to make room for second
-		if vim.api.nvim_buf_is_valid(buf) then
-			vim.api.nvim_buf_delete(buf, { force = true })
-		end
-
-		if char == "a" then
-			-- Apply (write to disk)
-			local final_content = utils.get_file_content(path, M.pending[path])
-			utils.write_file(path, final_content)
-			M.pending[path] = nil
-
-			-- Also update the loaded buffer if it exists, otherwise neovim
-			-- will complain that the file changed on disk :D
-			local bufnr = utils.find_buffer_by_rel_path(path)
-			if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
-				local new_lines = vim.split(final_content, "\n")
-				vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
-			end
-
-			print("Applied changes to " .. path)
-			process_next(index + 1)
-		elseif char == "d" then
-			-- Disard changes
-			-- This also send full content as update_content so
-			-- clients don't go out of sync
-
-			-- Used for old_last
-			local remote_line_count = #vim.split(
-				utils.get_file_content(path, M.pending[path]) or "",
-				"\n"
-			)
-
-			M.pending[path] = nil
-
-			-- Get the truth from disk
-			-- TODO: Make this a utility
-			local abs_path = utils.get_abs_path(path)
-			local disk_text = utils.read_file(abs_path)
-
-			if disk_text then
-				local disk_lines = vim.split(disk_text, "\n")
-
-				-- Keep host's buffers in sync as well
-				local bufnr = utils.find_buffer_by_rel_path(path)
-				if bufnr and vim.api.nvim_buf_is_loaded(bufnr) then
-					vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, disk_lines)
-				end
-
-				local events = require("cesp.events")
-				events.send_event({
-					event = "update_content",
-					path = path,
-					changes = {
-						first = 0,
-						old_last = remote_line_count,
-						lines = disk_lines,
-					},
-				})
-				print("Discarded changes for " .. path)
-			end
-
-			process_next(index + 1)
-		elseif char == "n" then
-			-- Skip change
-			print("Skipped " .. path)
-			process_next(index + 1)
-		elseif char == "q" then
-			-- Stop reviewing
-			return
-		else
-			print("Invalid option. Press 'a', 'd', 'n', or 'q'")
-			process_next(index)
-		end
-	end
-
-	process_next(1)
-end
-
 -- Listen for buffer line changes
 function M.attach_buf_listener(buf, on_change)
-	-- Don't attach same buffer twice
 	if M.attached[buf] then
 		return
 	end
 
-	-- Get buffer with relative path
 	local path = utils.get_rel_path(buf)
 	if not path then
 		print("Buffer outside project root, not applying listener")
 		return
 	end
 
-	-- Check for pending changes and apply them before attaching listener
-	-- This brings the buffer up to date with the server
-	if M.pending[path] then
-		local changes = M.pending[path]
-		-- Applies change one by one
-		-- This is little inefficient, but neovim can take care of
-		-- it very fast so it rarely becomes a bottleneck
-		for _, change in ipairs(changes) do
-			M.apply_change(buf, change)
-		end
-		M.pending[path] = nil
-		print("Applied pending changes for " .. path)
-	end
-
 	vim.api.nvim_buf_attach(buf, false, {
 		on_lines = function(_, _, _, first, old_last, new_last)
-			-- Prevent echoing back changes we just applied from the server
-			if M.is_applying then
+			if M.is_applying[buf] then
 				return
 			end
 
