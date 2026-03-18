@@ -154,21 +154,42 @@ into a string.
 
 (defun cesp--send-update(beg end len)
   "Sends an update_content event when buffer is updated."
-  (let ((lines (vconcat (split-string (buffer-substring-no-properties beg end) "
-" t))) ;; Newline regex
-		(first (line-number-at-pos beg))
-		(old_last (line-number-at-pos end)))
-	(cesp--send `((event . "update_content") (path . ,(buffer-name))
-				  (changes . ((first . ,first) (old_last . ,old_last) (lines . ,lines))) ))))
+  (if (= end 1)
+	  (message "ijgjiojdiogsiodfjg")
+	(let* (;; Lines
+		   (first (1- (line-number-at-pos beg)))
+		   (old-last (line-number-at-pos (1- end))) ;; 1- as a hacky fix for newlines
+		   ;; Positions
+		   (start-pos (save-excursion
+						(goto-char (point-min))
+						(forward-line first)
+						(point)))
+		   (end-pos (save-excursion
+					  (goto-char (point-min))
+					  (forward-line old-last)
+					  (point)))
+		   ;; Text
+		   (lines (vconcat (split-string (buffer-substring-no-properties start-pos end-pos) "
+" t)))) ;; Newline regex
+	  ;; Hacky newline fix
+	  (if (string= (buffer-substring-no-properties beg end) "
+")
+		  (setq lines (vconcat lines '(""))))
+	  ;; Hacky line deletion fix
+	  ;;(if (= (calcFunc-vlen lines) 0)
+	  ;;(setq lines (vconcat lines '(""))))
+	  (cesp--send `((event . "update_content") (path . ,(buffer-name))
+					(changes . ((first . ,first) (old_last . ,old-last) (lines . ,lines))) )))))
 
-(remove-hook 'after-change-functions 'cesp--send-update)
-(add-hook 'after-change-functions 'cesp--send-update)
-  
+;; DEBUG
+;;(remove-hook 'after-change-functions 'cesp--send-update)
+;;(add-hook 'after-change-functions 'cesp--send-update)
+
 ;;;; Handlers
 
 (defun cesp--filter(proc msg)
   "Main function which parses Cesp input.
-This function recieves all of the date recieved
+This function recieves all of the data recieved
 by the tcp connection, and calls other functions,
 as appropriate."
   (message "STRING: %s :STRING"  msg)
@@ -263,7 +284,7 @@ buffer."
 	(if buf
 		(let* ((pos (save-excursion ;; Get pos from column and row
 					  (goto-char (point-min))
-					  (forward-line (1- (car position)))
+					  (forward-line (car position))
 					  (forward-char (car (cdr position)))
 					  (point)))
 			   (overlay (or (cdr (assoc id cesp-cursors))
@@ -292,9 +313,12 @@ CHANGES is a alist with the changes specified as such:
 		  (goto-char (point-min))
 		  (forward-line beg)
 		  ;; Replace lines iteratively
+		  ;; (also make sure this doesn't trigger the cesp after-change hook)
+		  (setq inhibit-modification-hooks t)
 		  (kill-line  (- end beg) )
 		  (dolist (line lines)
-			(insert (concat line "\n")))))))
+			(insert (concat line "\n")))
+		  (setq inhibit-modification-hooks nil)))))
 
 ;;; _
 (provide 'cesp)
