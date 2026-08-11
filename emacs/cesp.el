@@ -30,7 +30,7 @@
 ;;; Public variables
 
 (defgroup cespconf nil
-  "Variables related to configuring Cesp"
+  "Variables related to configuring Cesp."
   :group 'communication)
 
 (defcustom cesp-name "Jaakko"
@@ -82,18 +82,21 @@ Format is:
 
 ;;;; Connection management
 
+;;;###autoload
 (defun cesp-connect-server(host port owner)
   "Connects to a Cesp server.
 This connects your Emacs session to a Cesp server
 at HOST PORT, for example localhost 8080
 which is the default for a Cesp server.
+OWNER specifies whether or not you wish to become
+the host, if possible.
 
 It will then perform the handshake, giving your
 name as per the variable"
   (interactive
    (list (read-string "Server hostname: ")
 		 (read-string "Server port: ")
-		 (y-or-n-p "Become host if possible: ")))
+		 (y-or-n-p "Become host if possible? ")))
   (if (or (not cesp-server-process) (not (process-live-p cesp-server-process)))
 	  (progn
 		(setq cesp-server-process (make-network-process
@@ -101,14 +104,15 @@ name as per the variable"
 								 :buffer (get-buffer-create "*cesp*") ;; Don't think this does anything
 								 :host host
 								 :service port
-								 :family 'ipv4 ;; TODO: Support for ipv6
-								 :filter 'cesp--filter
-								 :sentinel 'cesp--sentinel))
+								 :family #'ipv4 ;; TODO: Support for ipv6
+								 :filter #'cesp--filter
+								 :sentinel #'cesp--sentinel))
 		;; Perform handshake
 		(cesp--send `((event . "handshake") (name . cesp-name) (host . ,(or owner
 																			:false)))))
 	(error "You are already connected to a server!")))
 
+;;;###autoload
 (defun cesp-disconnect()
   "Disconnects Emacs from the Cesp server.
 This will disconnect the Emacs from
@@ -121,8 +125,9 @@ any"
 
 ;;;; File handling
 
+;;;###autoload
 (defun list-cesp-files()
-  "Sends a request to get the host's files
+  "Sends a request to get the host's files.
 This will send a request_files event to the host.
 This function does not handle the response"
   (interactive)
@@ -130,6 +135,7 @@ This function does not handle the response"
 	  (cesp--send '((event . "request_files")))
 	(error "You are not connected to a server!")))
 
+;;;###autoload
 (defun cesp-get-file(file)
   "Sends a request to get FILE from the host's computer.
 
@@ -142,6 +148,7 @@ This function may be used directly, or by cesp-browse-mode"
 ;;;; Other
 
 (defun cesp-mode (&optional ARG)
+  "Cesp-mode todo doc. ARG if called interactively."
   (interactive (list 'toggle))
   (setq cesp-mode
         (if (eq ARG 'toggle)
@@ -151,29 +158,28 @@ This function may be used directly, or by cesp-browse-mode"
   ;; Take some action when enabled or disabled
   (if cesp-mode
 	  (progn
-		(add-hook 'before-change-functions 'cesp--handle-before nil t)
-		(add-hook 'after-change-functions 'cesp--send-update nil t)
-		(add-hook 'post-command-hook 'cesp--send-mouse nil t))
+		(add-hook 'before-change-functions #'cesp--handle-before nil t)
+		(add-hook 'after-change-functions #'cesp--send-update nil t)
+		(add-hook 'post-command-hook #'cesp--send-mouse nil t))
 	(progn
-	  (remove-hook 'before-change-functions 'cesp--handle-before t)
-	  (remove-hook 'after-change-functions 'cesp--send-update t)
-	  (remove-hook 'post-command-hook 'cesp--send-mouse nil t))))
+	  (remove-hook 'before-change-functions #'cesp--handle-before t)
+	  (remove-hook 'after-change-functions #'cesp--send-update t)
+	  (remove-hook 'post-command-hook #'cesp--send-mouse nil t))))
 
 ;;; Internal functions
 
 (defun cesp--send(json-object)
   "Sends the server a message formatted in Json.
-This sends JSON to the Cesp server, which will then
+This sends JSON-OBJECT to the Cesp server, which will then
 forward the message accordingly to other clients or
 the host.
 
-JSON is an object that is parsed by json-serialize
-into a string.
-"
+JSON is an object that is parsed by"json-serialize"
+into a string."
   (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
 
 (defun cesp--get-files(dir)
-  "Returns a list containing file names, recursively."
+  "Return a list containing file names starting from DIR."
   (let ((file-list nil))
 	(dolist (entry (directory-files-and-attributes dir) nil)
 	  ;; Straight up ignore all hidden files, for now
@@ -189,11 +195,13 @@ into a string.
 	file-list))
 
 (defun cesp--handle-before(beg end)
-  "Handle things that happen before edits are made"
+  "Handle things that happen before edits are made.
+Handler function with BEG and END."
   (setq cesp--old-last (line-number-at-pos end)))
 
 (defun cesp--send-update(beg end len)
-  "Sends an update_content event after a buffer is updated."
+  "Sends an update_content event after a buffer is updated.
+This sends content between BEG and END to the server, LEN is unused."
   (if (and cesp--initialized (> beg 0) (> end 1))
 	  (let* ((first (1- (line-number-at-pos beg)))
 			 (new-last (line-number-at-pos end))
@@ -219,7 +227,7 @@ START is inclusive, LAST is exclusive."
 	(buffer-substring-no-properties beg end)))
 
 (defun cesp--send-mouse()
-  "Sends the current mouse position to the server"
+  "Send the current mouse position to the server."
   (unless (equal (point) cesp--last-position)
 	(let* ((col (1- (line-number-at-pos (point))))
 		   (ln-begin (save-excursion
@@ -233,10 +241,10 @@ START is inclusive, LAST is exclusive."
 ;;;; Handlers
 
 (defun cesp--filter(proc msg)
-  "Main function which parses Cesp input.
+  "Main function which will parse Cesp input from MSG.
 This function recieves all of the data recieved
 by the tcp connection, and calls other functions,
-as appropriate."
+as appropriate. PROC is unused."
   (message "STRING: %s :STRING" msg)
   ;; Split by newlines since sometimes multiple messages
   ;; come at once :shrug: Maybe TODO message buffer?
@@ -273,13 +281,14 @@ as appropriate."
 			(setq cesp-is-host nil)))))))
 
 (defun cesp--sentinel(proc msg)
-  "Sentinel function which handless status changes in connection."
+  "Sentinel function which will handle status change in connection.
+PROC and MSG are used somehow, idk."
   (if (string= msg "connection broken by remote peer\n")
       (message (format "client %s has quit" proc))
 	(message (concat "SENTINEL MESSAGE: "  msg))))
 
 (defun cesp--open-file-menu(files)
-  "Handler function which opens a menu to pick files."
+  "Handler function which opens a menu to pick FILES."
   (cesp-get-file (completing-read
    "Pick a file to open: "
    files nil t)))
@@ -314,6 +323,7 @@ FILES should be a list of file paths (strings)."
 This will create a buffer with the Cesp minor mode
 instantiated, which means the buffers contents are
 synchronized across the Cesp server.
+PATH will be the the name of the new buffer.
 
 If the buffer already exists, this will refresh the
 contents."
@@ -348,7 +358,7 @@ buffer."
 		  (move-overlay overlay pos (1+ pos) buf)))))
 
 (defun cesp--update-content(path changes)
-  "Handler function which applies changes to a buffer.
+  "Handler function which will apply change to buffer PATH.
 If the specified buffer is not currently open, then
 the changes are not applied.
 
