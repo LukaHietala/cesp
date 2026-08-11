@@ -62,6 +62,10 @@ corresponding buffer.
 Format is:
   (id . overlay )")
 
+(defvar cesp--old-last
+  nil
+  "Stores a line value before edits are made.")
+
 ;;; Public commands
 
 ;;;; Connection management
@@ -152,52 +156,43 @@ into a string.
 			(setq file-list (cons (concat dir "/" (car entry)) file-list)))))
 	file-list))
 
+(defun cesp--handle-before(beg end)
+  "Handle things that happen before edits are made"
+  (setq cesp--old-last (line-number-at-pos end)))
+
 (defun cesp--send-update(beg end len)
-  "Sends an update_content event when buffer is updated."
+  "Sends an update_content event after a buffer is updated."
   (if (and (> beg 0) (> end 1))
 	  (let* ((first (1- (line-number-at-pos beg)))
-			 (old-last (line-number-at-pos (1- end))) ;; 1- as a hacky fix for newlines 
-			 ;; Lines updated
-			 (lines (split-string (cesp--get-lines first old-last) "
-" nil))
-			 (last-char (cesp--last-char (buffer-substring-no-properties beg end)))
-			 (nline "
-"))
-		;; Formatting
-		;; (if (string= last-char nline)
-		;; 	(add-to-list 'lines "" t))
-		;;(message "Beg: %i End: %i Len: %i First: %d Old-last: %d Char: %s" beg end len first old-last last-char))))
+			 (new-last (line-number-at-pos end))
+ 			 (nline "
+")
+			 ;; Lines after update
+			 (lines (split-string (cesp--get-lines first new-last) nline nil)))
+		;(message "Beg: %i End: %i Len: %i First: %i Old-last: %i New-last: %i Line: %s" beg end len first cesp--old-last new-last (car lines)))))
 		(cesp--send `((event . "update_content") (path . ,(buffer-name))
-					  (changes . ((first . ,first) (old_last . ,old-last) (lines . ,(vconcat lines)))) )))))
+		 			  (changes . ((first . ,first) (old_last . ,cesp--old-last) (lines . ,(vconcat lines)))) )))))
 
 
 ;; DEBUG
-(line-number-at-pos (point))
-(split-string (cesp--get-lines 171 174) "
-")
-
-(cesp--send-update 5611 5612 0)
-
-(remove-hook 'after-change-functions 'cesp--send-update)
-(add-hook 'after-change-functions 'cesp--send-update)
-
-(defun cesp--last-char(string)
-  "Returns the last character of a strings or nil"
-  (condition-case nil
-	  (substring (reverse string) 0 1)
-	(t nil)))
+;; (progn
+;;   (remove-hook 'before-change-functions 'cesp--handle-before)
+;;   (remove-hook 'after-change-functions 'cesp--send-update))
+;; (progn
+;;   (add-hook 'before-change-functions 'cesp--handle-before)
+;;   (add-hook 'after-change-functions 'cesp--send-update))
 
 (defun cesp--get-lines(start last)
   "Get lines from START to LAST.
 START is inclusive, LAST is exclusive."
-  (let ((beg (save-excursion
-			   (goto-char (point-min))
-			   (forward-line (1- start))
-			   (point)))
-		(end (save-excursion
-			   (goto-char (point-min))
-			   (forward-line (1- last))
-			   (1- (point)))))
+  (let* ((beg (save-excursion
+				(goto-char (point-min))
+				(forward-line start)
+				(point)))
+		 (end (max beg (save-excursion
+						 (goto-char (point-min))
+						 (forward-line last)
+						 (1- (point))))))
 	(buffer-substring-no-properties beg end)))
 
 ;;;; Handlers
