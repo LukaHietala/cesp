@@ -154,36 +154,51 @@ into a string.
 
 (defun cesp--send-update(beg end len)
   "Sends an update_content event when buffer is updated."
-  (if (= end 1)
-	  (message "ijgjiojdiogsiodfjg")
-	(let* (;; Lines
-		   (first (1- (line-number-at-pos beg)))
-		   (old-last (line-number-at-pos (1- end))) ;; 1- as a hacky fix for newlines
-		   ;; Positions
-		   (start-pos (save-excursion
-						(goto-char (point-min))
-						(forward-line first)
-						(point)))
-		   (end-pos (save-excursion
-					  (goto-char (point-min))
-					  (forward-line old-last)
-					  (point)))
-		   ;; Text
-		   (lines (vconcat (split-string (buffer-substring-no-properties start-pos end-pos) "
-" t)))) ;; Newline regex
-	  ;; Hacky newline fix
-	  (if (string= (buffer-substring-no-properties beg end) "
-")
-		  (setq lines (vconcat lines '(""))))
-	  ;; Hacky line deletion fix
-	  ;;(if (= (calcFunc-vlen lines) 0)
-	  ;;(setq lines (vconcat lines '(""))))
-	  (cesp--send `((event . "update_content") (path . ,(buffer-name))
-					(changes . ((first . ,first) (old_last . ,old-last) (lines . ,lines))) )))))
+  (if (and (> beg 0) (> end 1))
+	  (let* ((first (1- (line-number-at-pos beg)))
+			 (old-last (line-number-at-pos (1- end))) ;; 1- as a hacky fix for newlines 
+			 ;; Lines updated
+			 (lines (split-string (cesp--get-lines first old-last) "
+" nil))
+			 (last-char (cesp--last-char (buffer-substring-no-properties beg end)))
+			 (nline "
+"))
+		;; Formatting
+		;; (if (string= last-char nline)
+		;; 	(add-to-list 'lines "" t))
+		;;(message "Beg: %i End: %i Len: %i First: %d Old-last: %d Char: %s" beg end len first old-last last-char))))
+		(cesp--send `((event . "update_content") (path . ,(buffer-name))
+					  (changes . ((first . ,first) (old_last . ,old-last) (lines . ,(vconcat lines)))) )))))
+
 
 ;; DEBUG
-;;(remove-hook 'after-change-functions 'cesp--send-update)
-;;(add-hook 'after-change-functions 'cesp--send-update)
+(line-number-at-pos (point))
+(split-string (cesp--get-lines 171 174) "
+")
+
+(cesp--send-update 5611 5612 0)
+
+(remove-hook 'after-change-functions 'cesp--send-update)
+(add-hook 'after-change-functions 'cesp--send-update)
+
+(defun cesp--last-char(string)
+  "Returns the last character of a strings or nil"
+  (condition-case nil
+	  (substring (reverse string) 0 1)
+	(t nil)))
+
+(defun cesp--get-lines(start last)
+  "Get lines from START to LAST.
+START is inclusive, LAST is exclusive."
+  (let ((beg (save-excursion
+			   (goto-char (point-min))
+			   (forward-line (1- start))
+			   (point)))
+		(end (save-excursion
+			   (goto-char (point-min))
+			   (forward-line (1- last))
+			   (1- (point)))))
+	(buffer-substring-no-properties beg end)))
 
 ;;;; Handlers
 
@@ -303,7 +318,7 @@ the changes are not applied.
 CHANGES is a alist with the changes specified as such:
 - first: First line (with 0 as the first line)
 - old_last: Last line I guess?
-- lines: List of lines the lines as they are now"
+- lines: List of the lines as they are now"
   (if (equal (buffer-name) path) ;; If correct buffer
 	  (save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
 		(let ((beg (cdr (assoc 'first changes)) )
