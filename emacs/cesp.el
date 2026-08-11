@@ -74,6 +74,10 @@ Format is:
   (defvar cesp--initialized nil
     "Whether or not initial content has been added."))
 
+(make-variable-buffer-local
+ (defvar cesp--last-position 0
+   "Holds the cursor position from the last run of post-command-hooks."))
+
 ;;; Public commands
 
 ;;;; Connection management
@@ -101,8 +105,8 @@ name as per the variable"
 								 :filter 'cesp--filter
 								 :sentinel 'cesp--sentinel))
 		;; Perform handshake
-		(cesp--send `((event . "handshake") (name . "Jaakko") (host . ,(or owner
-																		  :false)))))
+		(cesp--send `((event . "handshake") (name . cesp-name) (host . ,(or owner
+																			:false)))))
 	(error "You are already connected to a server!")))
 
 (defun cesp-disconnect()
@@ -148,10 +152,12 @@ This function may be used directly, or by cesp-browse-mode"
   (if cesp-mode
 	  (progn
 		(add-hook 'before-change-functions 'cesp--handle-before nil t)
-		(add-hook 'after-change-functions 'cesp--send-update nil t))
+		(add-hook 'after-change-functions 'cesp--send-update nil t)
+		(add-hook 'post-command-hook 'cesp--send-mouse nil t))
 	(progn
 	  (remove-hook 'before-change-functions 'cesp--handle-before t)
-	  (remove-hook 'after-change-functions 'cesp--send-update t))))
+	  (remove-hook 'after-change-functions 'cesp--send-update t)
+	  (remove-hook 'post-command-hook 'cesp--send-mouse nil t))))
 
 ;;; Internal functions
 
@@ -211,6 +217,18 @@ START is inclusive, LAST is exclusive."
 						 (forward-line last)
 						 (1- (point))))))
 	(buffer-substring-no-properties beg end)))
+
+(defun cesp--send-mouse()
+  "Sends the current mouse position to the server"
+  (unless (equal (point) cesp--last-position)
+	(let* ((col (1- (line-number-at-pos (point))))
+		   (ln-begin (save-excursion
+					   (beginning-of-line)
+					   (point)))
+		   (row (- (point) ln-begin))
+		   (pos `(,col ,row)))
+	  (cesp--send `((event . "cursor_move") (position . ,(vconcat pos)) (path . ,(buffer-name))))))
+  (setq cesp--last-position (point)))
 
 ;;;; Handlers
 
@@ -334,7 +352,7 @@ buffer."
 If the specified buffer is not currently open, then
 the changes are not applied.
 
-CHANGES is a alist with the changes specified as such:
+CHANGES is an alist with the changes specified as such:
 - first: First line (with 0 as the first line)
 - old_last: Last line I guess?
 - lines: List of the lines as they are now"
