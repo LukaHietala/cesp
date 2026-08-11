@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026  Wisdurm
 
-;; Author: Wisdurm <wisdurm@TheEngineer.TWOFORT>
+;; Author: Wisdurm <luukas.kola@gmail.com>
 ;; Keywords: comm, files
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -40,6 +40,10 @@ you are editing with them"
   :group 'cespconf
   :type '(string))
 
+(make-variable-buffer-local
+  (defvar cesp-mode nil
+    "Toggle cesp-mode."))
+
 ;;; Internal variables
 
 (defvar cesp-is-host
@@ -65,6 +69,10 @@ Format is:
 (defvar cesp--old-last
   nil
   "Stores a line value before edits are made.")
+
+(make-variable-buffer-local
+  (defvar cesp--initialized nil
+    "Whether or not initial content has been added."))
 
 ;;; Public commands
 
@@ -127,6 +135,24 @@ This function may be used directly, or by cesp-browse-mode"
 	  (cesp--send `((event . "request_file") (path . ,file)))
 	(error "You are not connected to a server!")))
 
+;;;; Other
+
+(defun cesp-mode (&optional ARG)
+  (interactive (list 'toggle))
+  (setq cesp-mode
+        (if (eq ARG 'toggle)
+            (not cesp-mode)
+          (> ARG 0)))
+
+  ;; Take some action when enabled or disabled
+  (if cesp-mode
+	  (progn
+		(add-hook 'before-change-functions 'cesp--handle-before nil t)
+		(add-hook 'after-change-functions 'cesp--send-update nil t))
+	(progn
+	  (remove-hook 'before-change-functions 'cesp--handle-before t)
+	  (remove-hook 'after-change-functions 'cesp--send-update t))))
+
 ;;; Internal functions
 
 (defun cesp--send(json-object)
@@ -162,7 +188,7 @@ into a string.
 
 (defun cesp--send-update(beg end len)
   "Sends an update_content event after a buffer is updated."
-  (if (and (> beg 0) (> end 1))
+  (if (and cesp--initialized (> beg 0) (> end 1))
 	  (let* ((first (1- (line-number-at-pos beg)))
 			 (new-last (line-number-at-pos end))
  			 (nline "
@@ -172,15 +198,6 @@ into a string.
 		;(message "Beg: %i End: %i Len: %i First: %i Old-last: %i New-last: %i Line: %s" beg end len first cesp--old-last new-last (car lines)))))
 		(cesp--send `((event . "update_content") (path . ,(buffer-name))
 		 			  (changes . ((first . ,first) (old_last . ,cesp--old-last) (lines . ,(vconcat lines)))) )))))
-
-
-;; DEBUG
-;; (progn
-;;   (remove-hook 'before-change-functions 'cesp--handle-before)
-;;   (remove-hook 'after-change-functions 'cesp--send-update))
-;; (progn
-;;   (add-hook 'before-change-functions 'cesp--handle-before)
-;;   (add-hook 'after-change-functions 'cesp--send-update))
 
 (defun cesp--get-lines(start last)
   "Get lines from START to LAST.
@@ -202,7 +219,7 @@ START is inclusive, LAST is exclusive."
 This function recieves all of the data recieved
 by the tcp connection, and calls other functions,
 as appropriate."
-  (message "STRING: %s :STRING"  msg)
+  (message "STRING: %s :STRING" msg)
   ;; Split by newlines since sometimes multiple messages
   ;; come at once :shrug: Maybe TODO message buffer?
   (dolist (string (split-string msg "
@@ -216,9 +233,8 @@ as appropriate."
 	  (message (concat "Event is: " event))
 	  (cond
 	   ((string= "response_files" event)
-		;; TODO: Check if already open, and if so, just update
-		(cesp--open-file-manager (cdr (assoc 'files json)) )
-		)
+		;;(cesp--open-file-manager (cdr (assoc 'files json)) )
+		(cesp--open-file-menu (cdr (assoc 'files json))))
 	   ((string= "response_file" event)
 		(cesp--open-remote-file
 		 (cdr (assoc 'path json))
@@ -236,14 +252,19 @@ as appropriate."
 	   ((string= "handshake_response" event)
 		(or (and (cdr (assoc 'is_host json))
 				 (setq cesp-is-host t))
-			(setq cesp-is-host nil)))
-	   ))))
+			(setq cesp-is-host nil)))))))
 
 (defun cesp--sentinel(proc msg)
-  "Sentinel function which handless statues changes in connection."
+  "Sentinel function which handless status changes in connection."
   (if (string= msg "connection broken by remote peer\n")
       (message (format "client %s has quit" proc))
 	(message (concat "SENTINEL MESSAGE: "  msg))))
+
+(defun cesp--open-file-menu(files)
+  "Handler function which opens a menu to pick files."
+  (cesp-get-file (completing-read
+   "Pick a file to open: "
+   files nil t)))
 
 (defun cesp--open-file-manager(files)
   "Handler function which opens a Cesp file browser.
@@ -281,7 +302,10 @@ contents."
   (switch-to-buffer (get-buffer-create path))
   ;; Replace everything
   (kill-region (point-min) (point-max))
-  (insert content))
+  (setq-local cesp--initialized nil)
+  (insert content)
+  (cesp-mode 1)
+  (setq-local cesp--initialized t))
 
 (defun cesp--render-cursor(id position buffer name)
   "Renders cursor ID at POSITION in BUFFER.
@@ -331,5 +355,6 @@ CHANGES is a alist with the changes specified as such:
 		  (setq inhibit-modification-hooks nil)))))
 
 ;;; _
+(add-to-list 'minor-mode-alist '(cesp-mode " Cesp:Shared"))
 (provide 'cesp)
 ;;; cesp.el ends here
