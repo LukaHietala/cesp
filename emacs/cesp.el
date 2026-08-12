@@ -101,7 +101,7 @@ name as per the variable"
    (list (read-string "Server hostname: ")
 		 (read-string "Server port: ")
 		 (y-or-n-p "Become host if possible? ")))
-  (if (or (not cesp-server-process) (not (process-live-p cesp-server-process)))
+  (if (not (cesp-connected-p))
 	  (progn
 		(setq cesp-server-process (make-network-process
 								 :name "cesp-process"
@@ -123,7 +123,7 @@ This will disconnect the Emacs from
 the Cesp server it is currently connected to, if
 any"
   (interactive)
-  (if (and cesp-server-process (process-live-p cesp-server-process))
+  (if (cesp-connected-p)
 	  (delete-process "cesp-process")
 	(error "You are not connected to a server!")))
 
@@ -135,7 +135,7 @@ any"
 This will send a request_files event to the host.
 This function does not handle the response"
   (interactive)
-  (if (and cesp-server-process (process-live-p cesp-server-process))
+  (if (cesp-connected-p)
 	  (cesp--send '((event . "request_files")))
 	(error "You are not connected to a server!")))
 
@@ -145,10 +145,18 @@ This function does not handle the response"
 
 This function may be used directly, or by cesp-browse-mode"
   (interactive "sFile path: ")
-  (if (and cesp-server-process (process-live-p cesp-server-process))
+  (if (cesp-connected-p)
 	  (cesp--send `((event . "request_file") (path . ,file)))
 	(error "You are not connected to a server!")))
 
+;;;###autoload
+(defun cesp-reload-buffer()
+  "Reloads the file in the current buffer."
+  (interactive)
+  (if cesp-mode
+	  (cesp-get-file (buffer-name))
+	(error "You are not in a Cesp buffer!")))
+  
 ;;;; Other
 
 (defun cesp-mode (&optional ARG)
@@ -169,6 +177,13 @@ This function may be used directly, or by cesp-browse-mode"
 	  (remove-hook 'before-change-functions #'cesp--handle-before t)
 	  (remove-hook 'after-change-functions #'cesp--send-update t)
 	  (remove-hook 'post-command-hook #'cesp--send-mouse nil t))))
+
+(defun cesp-connected-p()
+  "Is a Cesp connection currently active?"
+  (interactive)
+  (if (and cesp-server-process (process-live-p cesp-server-process))
+	  t
+	nil))
 
 ;;; Internal functions
 
@@ -383,6 +398,7 @@ buffer."
   (let ((buf (get-buffer buffer)))
 	(if buf
 		(let* ((pos (save-excursion ;; Get pos from column and row
+					  (set-buffer buffer)
 					  (goto-char (point-min))
 					  (forward-line (car position))
 					  (forward-char (car (cdr position)))
@@ -404,21 +420,23 @@ CHANGES is an alist with the changes specified as such:
 - first: First line (with 0 as the first line)
 - old_last: Last line I guess?
 - lines: List of the lines as they are now"
-  (if (equal (buffer-name) path) ;; If correct buffer
-	  (save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
-		(let ((beg (cdr (assoc 'first changes)) )
-			  (end (cdr (assoc 'old_last changes)) )
-			  (lines (cdr (assoc 'lines changes)) ))
-		  ;; Goto first line
-		  (goto-char (point-min))
-		  (forward-line beg)
-		  ;; Replace lines iteratively
-		  ;; (also make sure this doesn't trigger the cesp after-change hook)
-		  (setq inhibit-modification-hooks t)
-		  (kill-line  (- end beg) )
-		  (dolist (line lines)
-			(insert (concat line "\n")))
-		  (setq inhibit-modification-hooks nil)))))
+  (let ((buffer (get-buffer path)))
+	(if buffer
+		(save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
+		  (set-buffer buffer)
+		  (let ((beg (cdr (assoc 'first changes)) )
+				(end (cdr (assoc 'old_last changes)) )
+				(lines (cdr (assoc 'lines changes)) ))
+			;; Goto first line
+			(goto-char (point-min))
+			(forward-line beg)
+			;; Replace lines iteratively
+			;; (also make sure this doesn't trigger the cesp after-change hook)
+			(setq inhibit-modification-hooks t)
+			(kill-line  (- end beg) )
+			(dolist (line lines)
+			  (insert (concat line "\n")))
+			(setq inhibit-modification-hooks nil))))))
 
 ;;; _
 (add-to-list 'minor-mode-alist '(cesp-mode " Cesp:Shared"))
