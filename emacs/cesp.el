@@ -108,7 +108,7 @@ name as per the variable"
 								 :filter #'cesp--filter
 								 :sentinel #'cesp--sentinel))
 		;; Perform handshake
-		(cesp--send `((event . "handshake") (name . cesp-name) (host . ,(or owner
+		(cesp--send `((event . "handshake") (name . ,cesp-name) (host . ,(or owner
 																			:false)))))
 	(error "You are already connected to a server!")))
 
@@ -174,7 +174,7 @@ This sends JSON-OBJECT to the Cesp server, which will then
 forward the message accordingly to other clients or
 the host.
 
-JSON is an object that is parsed by"json-serialize"
+JSON is an object that is parsed by `json-serialize'
 into a string."
   (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
 
@@ -317,7 +317,6 @@ FILES should be a list of file paths (strings)."
 	  ;; hard to pass the data to the major mode startup
 	  )))
 
-
 (defun cesp--open-remote-file(path content)
   "Handler functon which opens a buffer with CONTENT.
 This will create a buffer with the Cesp minor mode
@@ -332,8 +331,24 @@ contents."
   (kill-region (point-min) (point-max))
   (setq-local cesp--initialized nil)
   (insert content)
+  ;; Try to activate appropriate major and minor modes.
+  ;; This could definitely be better
+  (funcall (cdr (assoc (buffer-name) auto-mode-alist 'string-match-p)))
+  ;; Initiate cesp-mode
   (cesp-mode 1)
   (setq-local cesp--initialized t))
+
+;; (defun cesp--lie-about-file-name(file)
+;;   "Function which intercepts `buffer-file-name' to lie.
+;; If `buffer-file-name' returns a real buffer name, everything
+;; works normally. However, if it is nil, and the buffer is marked
+;; as an Cesp buffer, this will instead return the `buffer-name'.
+;; This effectively lies to Emacs in order to get it to activate
+;; the correct modes automatically"
+;;   (or file
+;; 	  (buffer-name)))
+;; (advice-add 'buffer-file-name :filter-return #'cesp--lie-about-file-name)
+;; (advice-remove 'buffer-file-name #'cesp--lie-about-file-name)
 
 (defun cesp--render-cursor(id position buffer name)
   "Renders cursor ID at POSITION in BUFFER.
