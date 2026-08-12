@@ -256,7 +256,7 @@ as appropriate. PROC is unused."
 									:object-type 'alist
 									:array-type 'list))
 		   (event (cdr (assoc 'event json))))
-	  (message (concat "Event is: " event))
+	  ;;(message (concat "Event is: " event))
 	  (cond
 	   ((string= "response_files" event)
 		;;(cesp--open-file-manager (cdr (assoc 'files json)) )
