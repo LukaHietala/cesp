@@ -242,6 +242,16 @@ START is inclusive, LAST is exclusive."
 	  (cesp--send `((event . "cursor_move") (position . ,(vconcat pos)) (path . ,(buffer-name))))))
   (setq cesp--last-position (point)))
 
+(defun cesp--save-file(&optional ARG)
+  "If Cesp buffer send save event
+ARG is unused."
+  (if cesp-mode
+	  (progn
+		(message "(Sent remote_write event)")
+		(cesp--send `((event . "remote_write") (path . ,(buffer-name))))
+		t)
+	nil))
+
 ;;;; Handlers
 
 (defun cesp--filter(proc msg)
@@ -412,5 +422,7 @@ CHANGES is an alist with the changes specified as such:
 
 ;;; _
 (add-to-list 'minor-mode-alist '(cesp-mode " Cesp:Shared"))
+(advice-add 'save-buffer :before-until #'cesp--save-file)
+;(advice-remove 'save-buffer #'cesp--save-file)
 (provide 'cesp)
 ;;; cesp.el ends here
