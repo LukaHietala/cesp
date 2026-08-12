@@ -70,6 +70,10 @@ Format is:
   nil
   "Stores a line value before edits are made.")
 
+(defvar cesp--messafe-buffer
+  nil
+  "Stores unparsed data received from the server.")
+
 (make-variable-buffer-local
   (defvar cesp--initialized nil
     "Whether or not initial content has been added."))
@@ -242,43 +246,52 @@ START is inclusive, LAST is exclusive."
 
 (defun cesp--filter(proc msg)
   "Main function which will parse Cesp input from MSG.
-This function recieves all of the data recieved
+This function receives all of the data received
 by the tcp connection, and calls other functions,
 as appropriate. PROC is unused."
-  ;;(message "STRING: %s :STRING" msg)
-  ;; Split by newlines since sometimes multiple messages
-  ;; come at once :shrug: Maybe TODO message buffer?
-  (dolist (string (split-string msg "
-" t) ) ;; Newline regex :DDDD
-	;;(message "MESSAGE: %s" string)
-	;; Event handling
-	(let* ((json (json-parse-string string
-									:object-type 'alist
-									:array-type 'list))
-		   (event (cdr (assoc 'event json))))
-	  ;;(message (concat "Event is: " event))
-	  (cond
-	   ((string= "response_files" event)
-		;;(cesp--open-file-manager (cdr (assoc 'files json)) )
-		(cesp--open-file-menu (cdr (assoc 'files json))))
-	   ((string= "response_file" event)
-		(cesp--open-remote-file
-		 (cdr (assoc 'path json))
-		 (cdr (assoc 'content json))))
-	   ((string= "update_content" event)
-		(cesp--update-content
-		 (cdr (assoc 'path json))
-		 (cdr (assoc 'changes json))))
-	   ((string= "cursor_move" event)
-		(cesp--render-cursor
-		 (cdr (assoc 'from_id json))
-		 (cdr (assoc 'position json))
-		 (cdr (assoc 'path json))
-		 (cdr (assoc 'name json))))
-	   ((string= "handshake_response" event)
-		(or (and (cdr (assoc 'is_host json))
-				 (setq cesp-is-host t))
-			(setq cesp-is-host nil)))))))
+  ;; Store data in buffer because it doesn't always
+  ;; come in one packet
+  (push msg cesp--messafe-buffer)
+  (if (string-search "
+" msg)
+	  (let* ((nline "
+")
+			 (raw-data (mapconcat #'identity (reverse cesp--messafe-buffer)))
+			 (lines (split-string raw-data nline nil))
+			 (leftover (last lines)))
+		(setq lines (butlast lines))
+		(setq cesp--messafe-buffer leftover)
+		;; Handle lines
+		(dolist (string lines)
+		  ;;(message "MESSAGE: %s" raw-data)
+		  ;; Event handling
+		  (let* ((json (json-parse-string string
+										  :object-type 'alist
+										  :array-type 'list))
+				 (event (cdr (assoc 'event json))))
+			;;(message (concat "Event is: " event))
+			(cond
+			 ((string= "response_files" event)
+			  ;;(cesp--open-file-manager (cdr (assoc 'files json)) )
+			  (cesp--open-file-menu (cdr (assoc 'files json))))
+			 ((string= "response_file" event)
+			  (cesp--open-remote-file
+			   (cdr (assoc 'path json))
+			   (cdr (assoc 'content json))))
+			 ((string= "update_content" event)
+			  (cesp--update-content
+			   (cdr (assoc 'path json))
+			   (cdr (assoc 'changes json))))
+			 ((string= "cursor_move" event)
+			  (cesp--render-cursor
+			   (cdr (assoc 'from_id json))
+			   (cdr (assoc 'position json))
+			   (cdr (assoc 'path json))
+			   (cdr (assoc 'name json))))
+			 ((string= "handshake_response" event)
+			  (or (and (cdr (assoc 'is_host json))
+					   (setq cesp-is-host t))
+				  (setq cesp-is-host nil)))))))))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
