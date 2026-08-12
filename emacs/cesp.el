@@ -245,12 +245,12 @@ START is inclusive, LAST is exclusive."
 This function recieves all of the data recieved
 by the tcp connection, and calls other functions,
 as appropriate. PROC is unused."
-  (message "STRING: %s :STRING" msg)
+  ;;(message "STRING: %s :STRING" msg)
   ;; Split by newlines since sometimes multiple messages
   ;; come at once :shrug: Maybe TODO message buffer?
   (dolist (string (split-string msg "
 " t) ) ;; Newline regex :DDDD
-	(message "MESSAGE: %s" string)
+	;;(message "MESSAGE: %s" string)
 	;; Event handling
 	(let* ((json (json-parse-string string
 									:object-type 'alist
