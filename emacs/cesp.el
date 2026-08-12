@@ -38,11 +38,7 @@
 This is the name other users will see when
 you are editing with them"
   :group 'cespconf
-  :type '(string))
-
-(make-variable-buffer-local
-  (defvar cesp-mode nil
-    "Toggle cesp-mode."))
+  :type 'string)
 
 ;;; Internal variables
 
@@ -159,15 +155,20 @@ This function may be used directly, or by cesp-browse-mode"
   
 ;;;; Other
 
-(defun cesp-mode (&optional ARG)
-  "Cesp-mode todo doc. ARG if called interactively."
-  (interactive (list 'toggle))
-  (setq cesp-mode
-        (if (eq ARG 'toggle)
-            (not cesp-mode)
-          (> ARG 0)))
+;;;###autoload
+(defun cesp-connected-p()
+  "Is a Cesp connection currently active?"
+  (interactive)
+  (if (and cesp-server-process (process-live-p cesp-server-process))
+	  t
+	nil))
 
-  ;; Take some action when enabled or disabled
+;;;###autoload
+(define-minor-mode cesp-mode
+  "Toggles local cesp-mode."
+  :init-value nil
+  :lighter " Cesp:Shared"
+  :interactive nil
   (if cesp-mode
 	  (progn
 		(add-hook 'before-change-functions #'cesp--handle-before nil t)
@@ -177,13 +178,6 @@ This function may be used directly, or by cesp-browse-mode"
 	  (remove-hook 'before-change-functions #'cesp--handle-before t)
 	  (remove-hook 'after-change-functions #'cesp--send-update t)
 	  (remove-hook 'post-command-hook #'cesp--send-mouse nil t))))
-
-(defun cesp-connected-p()
-  "Is a Cesp connection currently active?"
-  (interactive)
-  (if (and cesp-server-process (process-live-p cesp-server-process))
-	  t
-	nil))
 
 ;;; Internal functions
 
@@ -439,7 +433,6 @@ CHANGES is an alist with the changes specified as such:
 			(setq inhibit-modification-hooks nil))))))
 
 ;;; _
-(add-to-list 'minor-mode-alist '(cesp-mode " Cesp:Shared"))
 (advice-add 'save-buffer :before-until #'cesp--save-file)
 ;(advice-remove 'save-buffer #'cesp--save-file)
 (provide 'cesp)

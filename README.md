@@ -2,13 +2,13 @@
 
 A protocol and implementations for live file sharing via a protocol and server
 that works across multiple editors and operating systems, intended to be quite
-minimal in it's feature set.
+minimal in it's feature set.  
 Cesp does **not** currently have any sort of methods for preventing data
 corruption. You are expected to be sitting with your pal and being vigilant
 about any problems. Whether or not such features will be implemented is up
-in the air.
+in the air.  
 Not all editors will work 100% the same, but Cesp should guarantee reasonable
-stability.
+stability.  
 
 | Editor | Status |
 | ------ | ------- |
@@ -81,17 +81,24 @@ by simply writing files as usual, as the normal action is overriden in Cesp buff
 
 ### Emacs
 
-To join the server, either as host or client, use `cesp-connect-server`
-To open a file, either use `list-cesp-files` to get an interactive menu, or use
-`cesp-get-file` to directly input the file name.
+You can use the following commands:
+
+- `cesp-connect-server`: Join a server, either as a host or client.
+- `cesp-disconnect`: Disconnect from a Cesp server.
+- `list-cesp-files`: List all of the host's files and choose one to open.
+- `cesp-get-file`: Directly input the name of a host's file to open.
+- `cesp-reload-buffer`: Re-open the current file.
+- `cesp-connected-p`: Whether or not your are currently connected to a Cesp
+  server.
 
 ### Neovim
 
 You can use the following commands:
 
-- `:CespJoin`: Join to session. Defaults to localhost, but you can specify
-  server's address by adding it as an argument (`:CespJoin 123.123.123.123`)
+- `:CespJoin`: Join a session. Defaults to localhost, but you can specify
+  the server's address by adding it as an argument (`:CespJoin 123.123.123.123`)
+  or via interactive usage
 - `:CespLeave`: Leave the session.
-- `:CespExplore`: Lists all host's files. If you have Telescope plugin installed
-  this will be much nicer.
+- `:CespExplore`: List all of the host's files. If you have the Telescope plugin
+  installed this will be much nicer.
 
