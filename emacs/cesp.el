@@ -215,7 +215,7 @@ Handler function with BEG and END."
 (defun cesp--send-update(beg end len)
   "Sends an update_content event after a buffer is updated.
 This sends content between BEG and END to the server, LEN is unused."
-  (if (and cesp--initialized (> beg 0) (> end 1))
+  (if cesp--initialized
 	  (let* ((first (1- (line-number-at-pos beg)))
 			 (new-last (line-number-at-pos end))
  			 (nline "
@@ -308,9 +308,7 @@ as appropriate. PROC is unused."
 			   (cdr (assoc 'path json))
 			   (cdr (assoc 'name json))))
 			 ((string= "handshake_response" event)
-			  (or (and (cdr (assoc 'is_host json))
-					   (setq cesp-is-host t))
-				  (setq cesp-is-host nil)))))))))
+			  (cesp--connected json))))))))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
@@ -318,6 +316,14 @@ PROC and MSG are used somehow, idk."
   (if (string= msg "connection broken by remote peer\n")
       (message (format "client %s has quit" proc))
 	(message (concat "SENTINEL MESSAGE: "  msg))))
+
+(defun cesp--connected(json)
+  "Function called when handshake_response is received.
+JSON is the json message directly received from the server"
+  (message "Connected to Cesp!")
+	   (or (and (cdr (assoc 'is_host json))
+				(setq cesp-is-host t))
+		   (setq cesp-is-host nil)))
 
 (defun cesp--open-file-menu(files)
   "Handler function which opens a menu to pick FILES."
@@ -359,9 +365,9 @@ PATH will be the the name of the new buffer.
 If the buffer already exists, this will refresh the
 contents."
   (switch-to-buffer (get-buffer-create path))
+  (setq-local cesp--initialized nil)
   ;; Replace everything
   (kill-region (point-min) (point-max))
-  (setq-local cesp--initialized nil)
   (insert content)
   ;; Try to activate appropriate major and minor modes.
   ;; This could definitely be better
