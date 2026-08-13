@@ -71,8 +71,8 @@ Format is:
   "Stores unparsed data received from the server.")
 
 (make-variable-buffer-local
-  (defvar cesp--initialized nil
-    "Whether or not initial content has been added."))
+ (defvar cesp--initialized nil
+   "Whether or not initial content has been added."))
 
 (make-variable-buffer-local
  (defvar cesp--last-position 0
@@ -100,16 +100,16 @@ name as per the variable"
   (if (not (cesp-connected-p))
 	  (progn
 		(setq cesp-server-process (make-network-process
-								 :name "cesp-process"
-								 :buffer (get-buffer-create "*cesp*") ;; Don't think this does anything
-								 :host host
-								 :service port
-								 :family #'ipv4 ;; TODO: Support for ipv6
-								 :filter #'cesp--filter
-								 :sentinel #'cesp--sentinel))
+								   :name "cesp-process"
+								   :buffer (get-buffer-create "*cesp*") ;; Don't think this does anything
+								   :host host
+								   :service port
+								   :family #'ipv4 ;; TODO: Support for ipv6
+								   :filter #'cesp--filter
+								   :sentinel #'cesp--sentinel))
 		;; Perform handshake
 		(cesp--send `((event . "handshake") (name . ,cesp-name) (host . ,(or owner
-																			:false)))))
+																			 :false)))))
 	(error "You are already connected to a server!")))
 
 ;;;###autoload
@@ -152,7 +152,7 @@ This function may be used directly, or by cesp-browse-mode"
   (if cesp-mode
 	  (cesp-get-file (buffer-name))
 	(error "You are not in a Cesp buffer!")))
-  
+
 ;;;; Other
 
 ;;;###autoload
@@ -210,14 +210,14 @@ into a string."
 (defun cesp--handle-before(beg end)
   "Handle things that happen before edits are made.
 Handler function with BEG and END."
-  (setq cesp--old-last (line-number-at-pos end)))
+  (setq cesp--old-last (line-number-at-pos end t)))
 
 (defun cesp--send-update(beg end len)
   "Sends an update_content event after a buffer is updated.
 This sends content between BEG and END to the server, LEN is unused."
   (if cesp--initialized
-	  (let* ((first (1- (line-number-at-pos beg)))
-			 (new-last (line-number-at-pos end))
+	  (let* ((first (1- (line-number-at-pos beg t)))
+			 (new-last (line-number-at-pos end t))
  			 (nline "
 ")
 			 ;; Lines after update
@@ -229,20 +229,22 @@ This sends content between BEG and END to the server, LEN is unused."
 (defun cesp--get-lines(start last)
   "Get lines from START to LAST.
 START is inclusive, LAST is exclusive."
-  (let* ((beg (save-excursion
-				(goto-char (point-min))
-				(forward-line start)
-				(point)))
-		 (end (max beg (save-excursion
-						 (goto-char (point-min))
-						 (forward-line last)
-						 (1- (point))))))
-	(buffer-substring-no-properties beg end)))
+  (save-restriction
+	(widen)
+	(let* ((beg (save-excursion
+				  (goto-char (point-min))
+				  (forward-line start)
+				  (point)))
+		   (end (max beg (save-excursion
+						   (goto-char (point-min))
+						   (forward-line last)
+						   (1- (point))))))
+	  (buffer-substring-no-properties beg end))))
 
 (defun cesp--send-mouse()
   "Send the current mouse position to the server."
   (unless (equal (point) cesp--last-position)
-	(let* ((col (1- (line-number-at-pos (point))))
+	(let* ((col (1- (line-number-at-pos (point) t)))
 		   (ln-begin (save-excursion
 					   (beginning-of-line)
 					   (point)))
@@ -321,15 +323,15 @@ PROC and MSG are used somehow, idk."
   "Function called when handshake_response is received.
 JSON is the json message directly received from the server"
   (message "Connected to Cesp!")
-	   (or (and (cdr (assoc 'is_host json))
-				(setq cesp-is-host t))
-		   (setq cesp-is-host nil)))
+  (or (and (cdr (assoc 'is_host json))
+		   (setq cesp-is-host t))
+	  (setq cesp-is-host nil)))
 
 (defun cesp--open-file-menu(files)
   "Handler function which opens a menu to pick FILES."
   (cesp-get-file (completing-read
-   "Pick a file to open: "
-   files nil t)))
+				  "Pick a file to open: "
+				  files nil t)))
 
 (defun cesp--open-file-manager(files)
   "Handler function which opens a Cesp file browser.
@@ -367,6 +369,7 @@ contents."
   (switch-to-buffer (get-buffer-create path))
   (setq-local cesp--initialized nil)
   ;; Replace everything
+  (widen)
   (kill-region (point-min) (point-max))
   (insert content)
   ;; Try to activate appropriate major and minor modes.
@@ -398,18 +401,20 @@ buffer."
   (let ((buf (get-buffer buffer)))
 	(if buf
 		(let* ((pos (save-excursion ;; Get pos from column and row
-					  (set-buffer buffer)
-					  (goto-char (point-min))
-					  (forward-line (car position))
-					  (forward-char (car (cdr position)))
-					  (point)))
-			   (overlay (or (cdr (assoc id cesp-cursors))
-							(let ((o (make-overlay pos (1+ pos) buf)))
-							  (overlay-put o 'face 'cursor)
-							  (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
-							  o))))
-		  ;; Update values
-		  (move-overlay overlay pos (1+ pos) buf)))))
+					  (save-restriction
+						(widen)
+						(set-buffer buffer)
+						(goto-char (point-min))
+						(forward-line (car position))
+						(forward-char (car (cdr position)))
+						(point))))
+					(overlay (or (cdr (assoc id cesp-cursors))
+								 (let ((o (make-overlay pos (1+ pos) buf)))
+								   (overlay-put o 'face 'cursor)
+								   (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
+								   o))))
+			   ;; Update values
+			   (move-overlay overlay pos (1+ pos) buf)))))
 
 (defun cesp--update-content(path changes)
   "Handler function which will apply change to buffer PATH.
@@ -424,6 +429,8 @@ CHANGES is an alist with the changes specified as such:
 	(if buffer
 		(save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
 		  (set-buffer buffer)
+		  (save-restriction
+			(widen)
 		  (let ((beg (cdr (assoc 'first changes)) )
 				(end (cdr (assoc 'old_last changes)) )
 				(lines (cdr (assoc 'lines changes)) ))
@@ -436,10 +443,10 @@ CHANGES is an alist with the changes specified as such:
 			(kill-line  (- end beg) )
 			(dolist (line lines)
 			  (insert (concat line "\n")))
-			(setq inhibit-modification-hooks nil))))))
+			(setq inhibit-modification-hooks nil)))))))
 
 ;;; _
 (advice-add 'save-buffer :before-until #'cesp--save-file)
-;(advice-remove 'save-buffer #'cesp--save-file)
+										;(advice-remove 'save-buffer #'cesp--save-file)
 (provide 'cesp)
 ;;; cesp.el ends here
