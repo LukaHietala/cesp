@@ -238,7 +238,11 @@ START is inclusive, LAST is exclusive."
 		   (end (max beg (save-excursion
 						   (goto-char (point-min))
 						   (forward-line last)
-						   (1- (point))))))
+						   ;; 1- is for newline fix but if at end of file
+						   ;; it is not needed
+						   (if (= (point) (point-max))
+							   (point)
+							 (1- (point)))))))
 	  (buffer-substring-no-properties beg end))))
 
 (defun cesp--send-mouse()
@@ -440,7 +444,8 @@ CHANGES is an alist with the changes specified as such:
 			;; Replace lines iteratively
 			;; (also make sure this doesn't trigger the cesp after-change hook)
 			(setq inhibit-modification-hooks t)
-			(kill-line  (- end beg) )
+			(dotimes (_ (- end beg))
+			  (delete-line))
 			(dolist (line lines)
 			  (insert (concat line "\n")))
 			(setq inhibit-modification-hooks nil)))))))
