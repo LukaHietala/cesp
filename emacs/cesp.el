@@ -25,8 +25,6 @@
 
 ;;; Code:
 
-(require 'cesp-browse-mode)
-
 ;;; Public variables
 
 (defgroup cespconf nil
@@ -222,7 +220,6 @@ This sends content between BEG and END to the server, LEN is unused."
 ")
 			 ;; Lines after update
 			 (lines (split-string (cesp--get-lines first new-last) nline nil)))
-		;(message "Beg: %i End: %i Len: %i First: %i Old-last: %i New-last: %i Line: %s" beg end len first cesp--old-last new-last (car lines)))))
 		(cesp--send `((event . "update_content") (path . ,(buffer-name))
 		 			  (changes . ((first . ,first) (old_last . ,cesp--old-last) (lines . ,(vconcat lines)))) )))))
 
@@ -251,7 +248,7 @@ START is inclusive, LAST is exclusive."
 	(if (region-active-p)
 		(cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point))))
 					  (selection . ((start_pos . ,(vconcat (cesp--col-and-row (mark)))))) (path . ,(buffer-name))))
-		;; If not highlighting
+	  ;; If not highlighting
 	  (cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point)))) (path . ,(buffer-name))))))
   (setq cesp--last-position (point)))
 
@@ -322,7 +319,6 @@ as appropriate. PROC is unused."
 			;;(message (concat "Event is: " event))
 			(cond
 			 ((string= "response_files" event)
-			  ;;(cesp--open-file-manager (cdr (assoc 'files json)) )
 			  (cesp--open-file-menu (cdr (assoc 'files json))))
 			 ((string= "response_file" event)
 			  (cesp--open-remote-file
@@ -362,30 +358,6 @@ JSON is the json message directly received from the server"
   (cesp-get-file (completing-read
 				  "Pick a file to open: "
 				  files nil t)))
-
-(defun cesp--open-file-manager(files)
-  "Handler function which opens a Cesp file browser.
-This will open a new window in cesp-browse-mode, where you
-can browse files on the host's computer, and open them in
-new buffers
-
-FILES should be a list of file paths (strings)."
-  (let ((file-window  (split-window-horizontally)))
-	(set-window-buffer file-window (get-buffer "*scratch*"))
-	(save-window-excursion ;; Set major mode
-	  (select-window file-window)
-	  (cesp-browse-mode)
-	  ;; Convert file list into tabulated data
-	  (setq tabulated-list-entries nil)
-	  (dolist (file files nil)
-		(setq tabulated-list-entries (cons (list
-											nil (vector "Jaakko Pekka" file)
-											)
-										   tabulated-list-entries)))
-	  (tabulated-list-print) ;; This doesn't seem very appropriate...
-	  ;; I'm not sure where else to do this though, since it's
-	  ;; hard to pass the data to the major mode startup
-	  )))
 
 (defun cesp--open-remote-file(path content)
   "Handler functon which opens a buffer with CONTENT.
@@ -461,23 +433,23 @@ CHANGES is an alist with the changes specified as such:
 		  (set-buffer buffer)
 		  (save-restriction
 			(widen)
-		  (let ((beg (cdr (assoc 'first changes)) )
-				(end (cdr (assoc 'old_last changes)) )
-				(lines (cdr (assoc 'lines changes)) ))
-			;; Goto first line
-			(goto-char (point-min))
-			(forward-line beg)
-			;; Replace lines iteratively
-			;; (also make sure this doesn't trigger the cesp after-change hook)
-			(setq inhibit-modification-hooks t)
-			(dotimes (_ (- end beg))
-			  (delete-line))
-			(dolist (line lines)
-			  (insert (concat line "\n")))
-			(setq inhibit-modification-hooks nil)))))))
+			(let ((beg (cdr (assoc 'first changes)) )
+				  (end (cdr (assoc 'old_last changes)) )
+				  (lines (cdr (assoc 'lines changes)) ))
+			  ;; Goto first line
+			  (goto-char (point-min))
+			  (forward-line beg)
+			  ;; Replace lines iteratively
+			  ;; (also make sure this doesn't trigger the cesp after-change hook)
+			  (setq inhibit-modification-hooks t)
+			  (dotimes (_ (- end beg))
+				(delete-line))
+			  (dolist (line lines)
+				(insert (concat line "\n")))
+			  (setq inhibit-modification-hooks nil)))))))
 
 ;;; _
 (advice-add 'save-buffer :before-until #'cesp--save-file)
-										;(advice-remove 'save-buffer #'cesp--save-file)
+;;(advice-remove 'save-buffer #'cesp--save-file)
 (provide 'cesp)
 ;;; cesp.el ends here
