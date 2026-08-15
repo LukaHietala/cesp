@@ -248,17 +248,31 @@ START is inclusive, LAST is exclusive."
 (defun cesp--send-mouse()
   "Send the current mouse position to the server."
   (unless (equal (point) cesp--last-position)
-	(let* ((col (1- (line-number-at-pos (point) t)))
-		   (ln-begin (save-excursion
-					   (beginning-of-line)
-					   (point)))
-		   (row (- (point) ln-begin))
-		   (pos `(,col ,row)))
-	  (cesp--send `((event . "cursor_move") (position . ,(vconcat pos)) (path . ,(buffer-name))))))
+	(if (region-active-p)
+		(cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point))))
+					  (selection . ((start_pos . ,(vconcat (cesp--col-and-row (mark)))))) (path . ,(buffer-name))))
+		;; If not highlighting
+	  (cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point)))) (path . ,(buffer-name))))))
   (setq cesp--last-position (point)))
 
+(defun cesp--col-and-row(point)
+  "Gets the column and row numbers of POINT.
+Returns a list with a column and row number.
+Column is 0-indexed."
+  (let* ((col (1- (line-number-at-pos point t)))
+		 (ln-begin (save-excursion
+					 (save-restriction
+					   (widen)
+					   (goto-char (point-min))
+					   (forward-line col)
+					   (beginning-of-line)
+					   (point))))
+		 (row (- point ln-begin))
+		 (pos `(,col ,row)))
+	pos))
+
 (defun cesp--save-file(&optional ARG)
-  "If Cesp buffer send save event
+  "If Cesp buffer send save event.
 ARG is unused."
   (if cesp-mode
 	  (progn
