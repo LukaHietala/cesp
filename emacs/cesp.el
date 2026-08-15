@@ -271,6 +271,17 @@ Column is 0-indexed."
 		 (pos `(,col ,row)))
 	pos))
 
+(defun cesp--point-from-pos(col row)
+  "Returns point from COL and ROW.
+COL is 0-indexed."
+  (save-excursion
+	(save-restriction
+	  (widen)
+	  (goto-char (point-min))
+	  (forward-line col)
+	  (forward-char row)
+	  (point))))
+
 (defun cesp--save-file(&optional ARG)
   "If Cesp buffer send save event.
 ARG is unused."
@@ -326,7 +337,8 @@ as appropriate. PROC is unused."
 			   (cdr (assoc 'from_id json))
 			   (cdr (assoc 'position json))
 			   (cdr (assoc 'path json))
-			   (cdr (assoc 'name json))))
+			   (cdr (assoc 'name json))
+			   (cdr (assoc 'start_pos (cdr (assoc 'selection json))))))
 			 ((string= "handshake_response" event)
 			  (cesp--connected json))))))))
 
@@ -409,30 +421,30 @@ contents."
 ;; (advice-add 'buffer-file-name :filter-return #'cesp--lie-about-file-name)
 ;; (advice-remove 'buffer-file-name #'cesp--lie-about-file-name)
 
-(defun cesp--render-cursor(id position buffer name)
+(defun cesp--render-cursor(id position buffer name &optional startpos)
   "Renders cursor ID at POSITION in BUFFER.
 ID is unique id for cursor, POSITION is a list
 with a column and row. NAME is rendered next to the
 cursor.
-The cursor is not rendered if you are not in the correct
-buffer."
+If STARTPOS is specified, the value between it
+and position is highlighted."
   (let ((buf (get-buffer buffer)))
 	(if buf
-		(let* ((pos (save-excursion ;; Get pos from column and row
-					  (save-restriction
-						(widen)
-						(set-buffer buffer)
-						(goto-char (point-min))
-						(forward-line (car position))
-						(forward-char (car (cdr position)))
-						(point))))
-					(overlay (or (cdr (assoc id cesp-cursors))
-								 (let ((o (make-overlay pos (1+ pos) buf)))
-								   (overlay-put o 'face 'cursor)
-								   (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
-								   o))))
-			   ;; Update values
-			   (move-overlay overlay pos (1+ pos) buf)))))
+		(let* ((pos (save-excursion
+					  (set-buffer buffer)
+					  (cesp--point-from-pos (car position) (car (cdr position)))))
+			   (pos2 (if startpos
+						 (save-excursion
+						   (set-buffer buffer)
+						   (cesp--point-from-pos (car startpos) (car (cdr startpos))))
+					   (1+ pos)))
+			   (overlay (or (cdr (assoc id cesp-cursors))
+							(let ((o (make-overlay pos pos2 buf)))
+							  (overlay-put o 'face 'cursor)
+							  (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
+							  o))))
+		  ;; Update values
+		  (move-overlay overlay pos pos2 buf)))))
 
 (defun cesp--update-content(path changes)
   "Handler function which will apply change to buffer PATH.
