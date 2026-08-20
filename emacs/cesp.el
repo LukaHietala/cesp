@@ -413,6 +413,7 @@ and position is highlighted."
 			   (overlay (or (cdr (assoc id cesp-cursors))
 							(let ((o (make-overlay pos pos2 buf)))
 							  (overlay-put o 'face 'cursor)
+							  (overlay-put o 'display name)
 							  (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
 							  o))))
 		  ;; Update values
