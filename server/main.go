@@ -6,17 +6,16 @@ import (
 	"log"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
 // TODO:
 // Save all bufs when os signal
-// Keep central list of connections (gorilla ws hub?)
 // Filetree, maybe slice of nodes that include relative and abs path?
 // Add abs and rel path to buffer
 // Save buf
-// Broadcast, request/response
 // Ignored files and dirs
 // Permissons???
 
@@ -27,8 +26,10 @@ type Buffer struct {
 
 func main() {
 	b := NewBuffer()
-
 	b.SetLines(0, -1, []string{"Mustan", "kissan", "paksut", "posket"})
+
+	hub := NewHub()
+	go hub.Run()
 
 	// TODO: Port, debug, ignored flags
 	listener, err := net.Listen("tcp", ":8080")
@@ -46,49 +47,78 @@ func main() {
 			continue
 		}
 
-		go handleConn(conn, b)
+		go handleConn(conn, b, hub)
 	}
 }
 
-func handleConn(conn net.Conn, b *Buffer) {
-	defer conn.Close()
-	// TODO: heartbeat to editors
-	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+func handleConn(conn net.Conn, b *Buffer, hub *Hub) {
+	client := &Client{
+		conn: conn,
+		send: make(chan string, 100),
+	}
 
+	hub.register <- client
+
+	defer func() {
+		hub.unregister <- client
+		conn.Close()
+		log.Println("Connection closed:", conn.RemoteAddr())
+	}()
+
+	// TODO: Heartbeat to conns
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	log.Println("New connection: ", conn.RemoteAddr())
 
-	lines, _ := b.GetLines(0, -1)
+	// Write pump
+	go func() {
+		for msg := range client.send {
+			fmt.Fprintln(conn, msg)
+		}
+	}()
 
-	// Buffered for now, later just blob of json
-	writer := bufio.NewWriter(conn)
+	// Temp
+	lines, _ := b.GetLines(0, -1)
 	for _, l := range lines {
-		fmt.Fprintln(writer, l)
+		client.send <- l
 	}
-	writer.Flush()
 
 	// Max 5MB buffer
 	const maxCap = 1024 * 1024 * 5
-
 	scanner := bufio.NewScanner(conn)
 	buf := make([]byte, maxCap)
 	scanner.Buffer(buf, maxCap)
 
+	// Read pump
 	for {
 		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 
 		if !scanner.Scan() {
 			break
-
 		}
-		text := scanner.Text()
-		fmt.Println(text)
+
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			continue
+		}
+
+		log.Println("Received: ", text)
+
+		// Ping, pong :D
+		if text == "kisu" {
+			client.send <- "mirri"
+			continue
+		}
+
+		// Broadcast to all other conns
+		hub.broadcast <- Message{
+			sender: conn,
+			event:  text,
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Println(err)
 	}
-
-	log.Println("Connection closed:", conn.RemoteAddr())
 }
 
 func NewBuffer() *Buffer {
