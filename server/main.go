@@ -17,7 +17,6 @@ import (
 
 // TODO:
 // Save all bufs when os signal
-// Save buf
 // Ignored files and dirs
 // SSH Tunnel (autossh like)
 // JSON v2
@@ -28,10 +27,14 @@ type Buffer struct {
 	lines []string
 }
 
-func main() {
-	b := NewBuffer("asdf")
-	b.SetLines(0, -1, []string{"Mustan", "kissan", "paksut", "posket"})
+type Session struct {
+	mu      sync.RWMutex
+	buffers map[string]*Buffer
+	fsys    fs.FS
+	rootDir string
+}
 
+func main() {
 	// TCP connection hub
 	hub := NewHub()
 	go hub.Run()
@@ -41,9 +44,14 @@ func main() {
 	fsys := os.DirFS(rootDir)
 
 	// Make sure fsys is valid
-	_, err := GetFiles(fsys)
-	if err != nil {
+	if _, err := GetFiles(fsys); err != nil {
 		log.Fatal(err)
+	}
+
+	session := &Session{
+		buffers: make(map[string]*Buffer),
+		fsys:    fsys,
+		rootDir: rootDir,
 	}
 
 	// TODO: Port, debug, ignored flags, shared dir
@@ -62,11 +70,11 @@ func main() {
 			continue
 		}
 
-		go handleConn(conn, b, hub)
+		go handleConn(conn, session, hub)
 	}
 }
 
-func handleConn(conn net.Conn, b *Buffer, hub *Hub) {
+func handleConn(conn net.Conn, session *Session, hub *Hub) {
 	client := &Client{
 		conn: conn,
 		send: make(chan string, 100),
@@ -112,30 +120,70 @@ func handleConn(conn net.Conn, b *Buffer, hub *Hub) {
 
 		log.Println("Received: ", text)
 
-		var msg EventUpdate
-		err := json.Unmarshal([]byte(text), &msg)
-		if err != nil {
+		var msg EventMessage
+		if err := json.Unmarshal([]byte(text), &msg); err != nil {
 			log.Println("Invalid JSON payload:", err)
-			// TODO: complain to client
 			continue
 		}
 
 		switch msg.Event {
+		case "request_files":
+			files, err := GetFiles(session.fsys)
+			if err != nil {
+				log.Println("Error reading files:", err)
+				continue
+			}
+
+			res := ResponseFiles{
+				Event: "response_files",
+				Files: files,
+			}
+			resBytes, _ := json.Marshal(res)
+			client.send <- string(resBytes)
+
+		case "request_file":
+			b := session.GetBuffer(msg.Path)
+			lines, _ := b.GetLines(0, -1)
+			content := strings.Join(lines, "\n")
+
+			res := ResponseFile{
+				Event:   "response_file",
+				Path:    msg.Path,
+				Content: content,
+			}
+			resBytes, _ := json.Marshal(res)
+			client.send <- string(resBytes)
+
 		case "update_content":
+			b := session.GetBuffer(msg.Path)
+
 			b.SetLines(
 				msg.Changes.First,
 				msg.Changes.OldLast,
 				msg.Changes.Lines,
 			)
-		}
 
-		lines, _ := b.GetLines(0, -1)
-		content := strings.Join(lines, "\n")
+			hub.broadcast <- Message{
+				sender: conn,
+				event:  text,
+			}
 
-		// Broadcast to all other conns
-		hub.broadcast <- Message{
-			sender: conn,
-			event:  content,
+		case "cursor_move":
+			hub.broadcast <- Message{
+				sender: conn,
+				event:  text,
+			}
+
+		case "remote_write":
+			b := session.GetBuffer(msg.Path)
+			if err := b.Save(session.rootDir); err != nil {
+				log.Printf("Error saving %s: %v\n", msg.Path, err)
+			} else {
+				log.Printf("Saved %s\n", msg.Path)
+			}
+
+		default:
+			log.Println("Unknown event", msg.Event)
 		}
 	}
 
@@ -165,16 +213,50 @@ func GetFiles(fsys fs.FS) ([]string, error) {
 	return paths, err
 }
 
+// GetBuffer returns an existing buffer for the path, or creates a new one
+func (s *Session) GetBuffer(path string) *Buffer {
+	// Try to get existing
+	s.mu.RLock()
+	b, exists := s.buffers[path]
+	s.mu.RUnlock()
+
+	if exists {
+		return b
+	}
+
+	// Create new and populate it with file content (if any)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check again to prevent duplicates
+	// This is a flaw of this double lock, but it's better than constant delays
+	if b, exists := s.buffers[path]; exists {
+		return b
+	}
+
+	b = NewBuffer(path)
+
+	content, err := fs.ReadFile(s.fsys, path)
+	if err == nil {
+		lines := strings.Split(string(content), "\n")
+		b.SetLines(0, -1, lines)
+	}
+
+	s.buffers[path] = b
+	return b
+}
+
 func NewBuffer(path string) *Buffer {
 	return &Buffer{
-		path:  path,
+		path: path,
+		// Buffers should never be empty
 		lines: []string{""},
 	}
 }
 
-// Saves buffer to path relative to root
+// Save saves buffer to path relative to root
 // dirFs is readonly so root path is used directly
-func (b *Buffer) SaveBuffer(rootDir string) error {
+func (b *Buffer) Save(rootDir string) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
