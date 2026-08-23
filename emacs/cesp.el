@@ -53,12 +53,13 @@ the connection to the tcp server")
 (defvar cesp-cursors
   nil
   "An alist of other peoples cursors.
-Cursors are overlays.
+There are two overlays, one for the cursor
+itself and another for the name.
 These will be shown, if you are in the
 corresponding buffer.
 
 Format is:
-  (id . overlay )")
+  (id . (cursor-overlay name-overlay) )")
 
 (defvar cesp--old-last
   nil
@@ -118,7 +119,10 @@ the Cesp server it is currently connected to, if
 any"
   (interactive)
   (if (cesp-connected-p)
-	  (delete-process "cesp-process")
+	  (progn
+		(delete-process "cesp-process")
+		(cesp--clear-cursors)
+		(message "Disconnected from Cesp server"))
 	(error "You are not connected to a server!")))
 
 ;;;; File handling
@@ -410,14 +414,34 @@ and position is highlighted."
 						   (set-buffer buffer)
 						   (cesp--point-from-pos (car startpos) (car (cdr startpos))))
 					   (1+ pos)))
-			   (overlay (or (cdr (assoc id cesp-cursors))
-							(let ((o (make-overlay pos pos2 buf)))
-							  (overlay-put o 'face 'cursor)
-							  ;;(overlay-put o 'display name)
-							  (setq cesp-cursors (cons `(,id . ,o) cesp-cursors))
-							  o))))
+			   (line-end (save-excursion
+						   (save-restriction
+							 (widen)
+							 (goto-char (point-min))
+							 (forward-line (car position))
+							 (end-of-line)
+							 (point))))
+			   (overlay-pair (or (cdr (assoc id cesp-cursors))
+								 (let ((c-o (make-overlay pos pos2 buf))
+									   (n-o (make-overlay line-end (1- line-end) buf)))
+								   (overlay-put c-o 'face 'cursor)
+								   ;; This took over 3 hours
+								   (overlay-put n-o 'after-string (concat " " (propertize (concat " " name) 'face 'cursor)))
+								   (setq cesp-cursors (cons `(,id . (,c-o ,n-o)) cesp-cursors))
+								   `(,c-o ,n-o)))))
 		  ;; Update values
-		  (move-overlay overlay pos pos2 buf)))))
+		  (move-overlay (car overlay-pair) pos pos2 buf)
+		  (move-overlay (car (cdr overlay-pair)) line-end (1- line-end) buf)))))
+
+(defun cesp--clear-cursors()
+  "Deletes other peoples cursors.
+Mainly for debugging but also used when
+disconnected."
+  (progn
+	(dolist (o cesp-cursors)
+	  (delete-overlay (car (cdr o)))
+	  (delete-overlay (car (cdr (cdr o)))))
+	(setq cesp-cursors nil)))
 
 (defun cesp--update-content(path changes)
   "Handler function which will apply change to buffer PATH.
