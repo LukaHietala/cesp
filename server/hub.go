@@ -1,13 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"net"
+	"sync/atomic"
 )
 
 // Central place to manage all TCP connections
 // Heavily inspired by: https://github.com/gorilla/websocket/blob/main/examples/chat/hub.go
 
+var nextID atomic.Uint64
+
 type Client struct {
+	id   uint64
+	name string
 	conn net.Conn
 	// Queue for outgoing messages (buffered)
 	send chan any
@@ -31,6 +37,14 @@ type Hub struct {
 	shutdown chan struct{}
 }
 
+func NewClient(conn net.Conn) *Client {
+	return &Client{
+		id:   nextID.Add(1),
+		conn: conn,
+		send: make(chan any, 100),
+	}
+}
+
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
@@ -39,6 +53,14 @@ func NewHub() *Hub {
 		unregister: make(chan *Client),
 		shutdown:   make(chan struct{}),
 	}
+}
+
+func (c *Client) SetName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+	c.name = name
+	return nil
 }
 
 // Cleanup all clients
@@ -53,6 +75,13 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 
 		case client := <-h.unregister:
+			h.broadcast <- Message{
+				sender: nil,
+				payload: UserJoinedOrLeft{
+					Event: "user_left",
+					ID:    client.id,
+					Name:  client.name,
+				}}
 			delete(h.clients, client)
 
 		case msg := <-h.broadcast:

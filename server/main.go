@@ -167,10 +167,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client := &Client{
-		conn: conn,
-		send: make(chan any, 100),
-	}
+	client := NewClient(conn)
 
 	s.hub.register <- client
 
@@ -262,6 +259,7 @@ func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) er
 		b := s.session.GetBuffer(msg.Path)
 		lines, _ := b.GetLines(0, -1)
 
+		log.Println(msg.Path)
 		client.send <- ResponseFile{
 			Event:   "response_file",
 			Path:    msg.Path,
@@ -293,12 +291,35 @@ func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) er
 		}
 		log.Printf("Saved %s\n", msg.Path)
 
+	case "handshake":
+		err := client.SetName(msg.Name)
+		if err != nil {
+			return err
+		}
+
+		client.send <- HandshakeReponse{
+			Event: "handshake_response",
+			ID:    client.id,
+			Name:  msg.Name,
+		}
+
+		s.hub.broadcast <- Message{
+			sender: conn,
+			payload: UserJoinedOrLeft{
+				Event: "user_joined",
+				ID:    client.id,
+				Name:  msg.Name,
+			},
+		}
+
 	case "":
 		return fmt.Errorf("empty event")
 
 	default:
 		// Just forward if nothing needs to be done
 		// Maybe not wise if invalid event but that's the clients problem now
+		msg.FromID = client.id
+		msg.Name = client.name
 		s.hub.broadcast <- Message{
 			sender:  conn,
 			payload: msg,
