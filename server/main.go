@@ -2,100 +2,167 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // TODO:
 // Save all bufs when os signal
-// Ignored files and dirs
 // SSH Tunnel (autossh like)
 // JSON v2
 
-type Buffer struct {
-	mu    sync.RWMutex
-	path  string
-	lines []string
+type Server struct {
+	listener net.Listener
+	quit     chan struct{}
+	wg       sync.WaitGroup
+	// Holds all TCP connections
+	hub *Hub
+	// Holds buffers, and other non-tcp stuff
+	session *Session
 }
 
 type Session struct {
-	mu      sync.RWMutex
-	buffers map[string]*Buffer
-	fsys    fs.FS
+	// Open buffers
+	buffers sync.Map
+	// Readonly fs for project files
+	fsys fs.FS
+	// Path to project files
 	rootDir string
 }
 
+type Buffer struct {
+	mu sync.RWMutex
+	// Path in fsys to file
+	path string
+	// Content
+	lines []string
+}
+
 func main() {
-	// TCP connection hub
-	hub := NewHub()
-	go hub.Run()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// Shared dir
-	rootDir := "."
-	fsys := os.DirFS(rootDir)
+	// TODO: Flags
+	addr := ":8080"
+	s := NewServer(addr, ".")
 
-	// Make sure fsys is valid
-	if _, err := GetFiles(fsys); err != nil {
+	<-ctx.Done()
+	s.Stop()
+	os.Exit(0)
+}
+
+func NewServer(addr, rootDir string) *Server {
+	s := &Server{
+		quit: make(chan struct{}),
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
 		log.Fatal(err)
 	}
 
+	hub := NewHub()
+	go hub.Run()
+
+	fsys := os.DirFS(rootDir)
+
 	session := &Session{
-		buffers: make(map[string]*Buffer),
 		fsys:    fsys,
 		rootDir: rootDir,
 	}
 
-	// TODO: Port, debug, ignored flags, shared dir
-	listener, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
+	s.listener = listener
+	s.hub = hub
+	s.session = session
 
-	log.Println("Listening on :8080")
+	s.wg.Add(1)
+	go s.serve()
+
+	return s
+}
+
+func (s *Server) Stop() {
+	// Signals to all goroutines to die
+	close(s.quit)
+	// Stop accepting new connections
+	s.listener.Close()
+	// Closes all existing connections
+	s.hub.Stop()
+	// Wait for everything to cleanup
+	s.wg.Wait()
+}
+
+func (s *Server) serve() {
+	defer s.wg.Done()
+	log.Println("Listening on", s.listener.Addr().String())
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
-			log.Println(err)
+			select {
+			case <-s.quit:
+				return
+			default:
+				log.Println("accept error", err)
+			}
 			continue
 		}
 
-		go handleConn(conn, session, hub)
+		go s.handleConnection(conn)
 	}
 }
 
-func handleConn(conn net.Conn, session *Session, hub *Hub) {
+func (s *Server) handleConnection(conn net.Conn) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &Client{
 		conn: conn,
-		send: make(chan string, 100),
+		send: make(chan any, 100),
 	}
 
-	hub.register <- client
+	s.hub.register <- client
 
 	defer func() {
-		hub.unregister <- client
+		s.hub.unregister <- client
 		conn.Close()
-		log.Println("Connection closed:", conn.RemoteAddr())
+		log.Println("Connection closed", conn.RemoteAddr())
 	}()
 
-	// TODO: Heartbeat to conns
-	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
-	log.Println("New connection: ", conn.RemoteAddr())
+	log.Println("New connection", conn.RemoteAddr())
 
 	// Write pump
 	go func() {
-		for msg := range client.send {
-			fmt.Fprintln(conn, msg)
+		encoder := json.NewEncoder(conn)
+		for {
+			select {
+			case <-ctx.Done():
+				// Read pump exited or write failed so die
+				return
+			case msg, ok := <-client.send:
+				if !ok {
+					return
+				}
+				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				err := encoder.Encode(msg)
+				if err != nil {
+					log.Println("write error", err)
+					cancel()
+					return
+				}
+			}
 		}
 	}()
 
@@ -106,84 +173,31 @@ func handleConn(conn net.Conn, session *Session, hub *Hub) {
 	scanner.Buffer(buf, maxCap)
 
 	// Read pump
-	for {
-		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
-
-		if !scanner.Scan() {
+	for scanner.Scan() {
+		// If write is broken die
+		if ctx.Err() != nil {
 			break
 		}
+
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 
 		text := strings.TrimSpace(scanner.Text())
 		if text == "" {
 			continue
 		}
 
-		log.Println("Received: ", text)
+		log.Println("Received", text)
 
 		var msg EventMessage
-		if err := json.Unmarshal([]byte(text), &msg); err != nil {
-			log.Println("Invalid JSON payload:", err)
+		err := json.Unmarshal([]byte(text), &msg)
+		if err != nil {
+			log.Printf("Invalid JSON payload from %s: %v\n", conn.RemoteAddr(), err)
 			continue
 		}
 
-		switch msg.Event {
-		case "request_files":
-			files, err := GetFiles(session.fsys)
-			if err != nil {
-				log.Println("Error reading files:", err)
-				continue
-			}
-
-			res := ResponseFiles{
-				Event: "response_files",
-				Files: files,
-			}
-			resBytes, _ := json.Marshal(res)
-			client.send <- string(resBytes)
-
-		case "request_file":
-			b := session.GetBuffer(msg.Path)
-			lines, _ := b.GetLines(0, -1)
-			content := strings.Join(lines, "\n")
-
-			res := ResponseFile{
-				Event:   "response_file",
-				Path:    msg.Path,
-				Content: content,
-			}
-			resBytes, _ := json.Marshal(res)
-			client.send <- string(resBytes)
-
-		case "update_content":
-			b := session.GetBuffer(msg.Path)
-
-			b.SetLines(
-				msg.Changes.First,
-				msg.Changes.OldLast,
-				msg.Changes.Lines,
-			)
-
-			hub.broadcast <- Message{
-				sender: conn,
-				event:  text,
-			}
-
-		case "cursor_move":
-			hub.broadcast <- Message{
-				sender: conn,
-				event:  text,
-			}
-
-		case "remote_write":
-			b := session.GetBuffer(msg.Path)
-			if err := b.Save(session.rootDir); err != nil {
-				log.Printf("Error saving %s: %v\n", msg.Path, err)
-			} else {
-				log.Printf("Saved %s\n", msg.Path)
-			}
-
-		default:
-			log.Println("Unknown event", msg.Event)
+		err = s.handleEvent(msg, client, conn)
+		if err != nil {
+			log.Println("event error", err)
 		}
 	}
 
@@ -192,17 +206,86 @@ func handleConn(conn net.Conn, session *Session, hub *Hub) {
 	}
 }
 
-// GetFiles returns all paths in DirFS
-// TODO: filter
+func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) error {
+	switch msg.Event {
+	case "request_files":
+		files, err := GetFiles(s.session.fsys)
+		if err != nil {
+			return err
+		}
+
+		client.send <- ResponseFiles{
+			Event: "response_files",
+			Files: files,
+		}
+
+	case "request_file":
+		b := s.session.GetBuffer(msg.Path)
+		lines, _ := b.GetLines(0, -1)
+
+		client.send <- ResponseFile{
+			Event:   "response_file",
+			Path:    msg.Path,
+			Content: strings.Join(lines, "\n"),
+		}
+
+	case "update_content":
+		if msg.Changes == nil {
+			return fmt.Errorf("update_content missing changes")
+		}
+
+		b := s.session.GetBuffer(msg.Path)
+		b.SetLines(
+			msg.Changes.First,
+			msg.Changes.OldLast,
+			msg.Changes.Lines,
+		)
+
+		s.hub.broadcast <- Message{
+			sender:  conn,
+			payload: msg,
+		}
+
+	case "remote_write":
+		b := s.session.GetBuffer(msg.Path)
+		err := b.Save(s.session.rootDir)
+		if err != nil {
+			log.Printf("Error saving %s: %v\n", msg.Path, err)
+		}
+		log.Printf("Saved %s\n", msg.Path)
+
+	case "":
+		return fmt.Errorf("empty event")
+
+	default:
+		// Just forward if nothing needs to be done
+		// Maybe not wise if invalid event but that's the clients problem now
+		s.hub.broadcast <- Message{
+			sender:  conn,
+			payload: msg,
+		}
+	}
+
+	return nil
+}
+
 func GetFiles(fsys fs.FS) ([]string, error) {
-	paths := []string{}
+	var paths []string
+
+	// TODO: Flags, add more defaults
+	ignoredDirs := map[string]bool{
+		".git":         true,
+		"node_modules": true,
+	}
 
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() {
+			if ignoredDirs[d.Name()] {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
@@ -215,56 +298,45 @@ func GetFiles(fsys fs.FS) ([]string, error) {
 
 // GetBuffer returns an existing buffer for the path, or creates a new one
 func (s *Session) GetBuffer(path string) *Buffer {
-	// Try to get existing
-	s.mu.RLock()
-	b, exists := s.buffers[path]
-	s.mu.RUnlock()
-
-	if exists {
-		return b
+	// Try to get open buffer
+	if v, ok := s.buffers.Load(path); ok {
+		return v.(*Buffer)
 	}
 
-	// Create new and populate it with file content (if any)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Check again to prevent duplicates
-	// This is a flaw of this double lock, but it's better than constant delays
-	if b, exists := s.buffers[path]; exists {
-		return b
-	}
-
-	b = NewBuffer(path)
-
+	// If not found create a new one
+	b := NewBuffer(path)
+	// Populate with files contents, defaults to empty slice
 	content, err := fs.ReadFile(s.fsys, path)
 	if err == nil {
 		lines := strings.Split(string(content), "\n")
 		b.SetLines(0, -1, lines)
 	}
 
-	s.buffers[path] = b
-	return b
+	// Thread-safe (sync map)
+	actual, _ := s.buffers.LoadOrStore(path, b)
+	return actual.(*Buffer)
 }
 
 func NewBuffer(path string) *Buffer {
 	return &Buffer{
 		path: path,
-		// Buffers should never be empty
+		// Lines must never be empty
 		lines: []string{""},
 	}
 }
 
-// Save saves buffer to path relative to root
-// dirFs is readonly so root path is used directly
+// Save saves a buffer
 func (b *Buffer) Save(rootDir string) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	// Rotanloukku
 	if !fs.ValidPath(b.path) {
-		return fmt.Errorf("invalid path: %s", b.path)
+		return fmt.Errorf("illegal path %s", b.path)
 	}
 
-	fullPath := filepath.Join(rootDir, b.path)
+	cleanRoot := filepath.Clean(rootDir)
+	fullPath := filepath.Join(cleanRoot, b.path)
 
 	content := strings.Join(b.lines, "\n")
 	return os.WriteFile(fullPath, []byte(content), 0644)
@@ -310,6 +382,5 @@ func normalizeIndex(index, length int) int {
 	if index < 0 {
 		index = length + index + 1
 	}
-
 	return max(0, min(index, length))
 }
