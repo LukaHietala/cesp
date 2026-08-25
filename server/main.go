@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -40,6 +41,8 @@ type Session struct {
 	fsys fs.FS
 	// Path to project files
 	rootDir string
+	// Map of ignored dirs
+	ignoredDirs map[string]bool
 }
 
 type Buffer struct {
@@ -50,20 +53,55 @@ type Buffer struct {
 	lines []string
 }
 
+// TODO: files too
+var defaultIgnoredDirs = []string{
+	".git", "node_modules", "build", ".venv", ".vscode", "venv", "__pycache__",
+}
+
+func parseArgs() (port string, rootDir string, ignoredDirs map[string]bool) {
+	portPtr := flag.String("port", "8080", "Port to run the server on")
+	ignorePtr := flag.String("ignore", "", "Comma separated extra dirs to ignore")
+	flag.Parse()
+
+	if rootDir == "" {
+		rootDir = "."
+	}
+
+	if flag.NArg() > 0 {
+		rootDir = flag.Arg(0)
+	}
+
+	ignoredDirs = make(map[string]bool, len(defaultIgnoredDirs))
+	for _, v := range defaultIgnoredDirs {
+		ignoredDirs[v] = true
+	}
+
+	if *ignorePtr != "" {
+		for v := range strings.SplitSeq(*ignorePtr, ",") {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				ignoredDirs[trimmed] = true
+			}
+		}
+	}
+
+	return *portPtr, rootDir, ignoredDirs
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// TODO: Flags
-	addr := ":8080"
-	s := NewServer(addr, ".")
+	port, rootDir, ignoredDirs := parseArgs()
+
+	addr := ":" + port
+	s := NewServer(addr, rootDir, ignoredDirs)
 
 	<-ctx.Done()
 	s.Stop()
 	os.Exit(0)
 }
 
-func NewServer(addr, rootDir string) *Server {
+func NewServer(addr, rootDir string, ignoredDirs map[string]bool) *Server {
 	s := &Server{
 		quit: make(chan struct{}),
 	}
@@ -79,8 +117,9 @@ func NewServer(addr, rootDir string) *Server {
 	fsys := os.DirFS(rootDir)
 
 	session := &Session{
-		fsys:    fsys,
-		rootDir: rootDir,
+		fsys:        fsys,
+		rootDir:     rootDir,
+		ignoredDirs: ignoredDirs,
 	}
 
 	s.listener = listener
@@ -209,7 +248,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) error {
 	switch msg.Event {
 	case "request_files":
-		files, err := GetFiles(s.session.fsys)
+		files, err := GetFiles(s.session.fsys, s.session.ignoredDirs)
 		if err != nil {
 			return err
 		}
@@ -269,14 +308,8 @@ func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) er
 	return nil
 }
 
-func GetFiles(fsys fs.FS) ([]string, error) {
+func GetFiles(fsys fs.FS, ignoredDirs map[string]bool) ([]string, error) {
 	var paths []string
-
-	// TODO: Flags, add more defaults
-	ignoredDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-	}
 
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
