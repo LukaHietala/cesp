@@ -202,6 +202,28 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
+	// Ping/Pong
+	// Resets read pumps deadline
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case client.send <- PingEvent{Event: "ping"}:
+				case <-ctx.Done():
+					return
+				default:
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
 	// Max 5MB buffer
 	const maxCap = 1024 * 1024 * 5
 	scanner := bufio.NewScanner(conn)
@@ -209,7 +231,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 	scanner.Buffer(buf, maxCap)
 
 	// Read pump
-	for scanner.Scan() {
+	for {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+
+		if !scanner.Scan() {
+			break
+		}
+
 		// If write is broken die
 		if ctx.Err() != nil {
 			break
@@ -311,6 +339,9 @@ func (s *Server) handleEvent(msg EventMessage, client *Client, conn net.Conn) er
 				Name:  msg.Name,
 			},
 		}
+
+	case "pong":
+		return nil
 
 	case "":
 		return fmt.Errorf("empty event")

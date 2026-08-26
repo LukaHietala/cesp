@@ -75,14 +75,16 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 
 		case client := <-h.unregister:
-			h.broadcast <- Message{
-				sender: nil,
-				payload: UserJoinedOrLeft{
-					Event: "user_left",
-					ID:    client.id,
-					Name:  client.name,
-				}}
 			delete(h.clients, client)
+			go func() {
+				h.broadcast <- Message{
+					sender: nil,
+					payload: UserJoinedOrLeft{
+						Event: "user_left",
+						ID:    client.id,
+						Name:  client.name,
+					}}
+			}()
 
 		case msg := <-h.broadcast:
 			for client := range h.clients {

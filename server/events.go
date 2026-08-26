@@ -43,3 +43,7 @@ type UserJoinedOrLeft struct {
 	Name  string `json:"name"`
 	ID    uint64 `json:"id"`
 }
+
+type PingEvent struct {
+	Event string `json:"event"`
+}
