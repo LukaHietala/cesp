@@ -193,22 +193,6 @@ JSON is an object that is parsed by `json-serialize'
 into a string."
   (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
 
-(defun cesp--get-files(dir)
-  "Return a list containing file names starting from DIR."
-  (let ((file-list nil))
-	(dolist (entry (directory-files-and-attributes dir) nil)
-	  ;; Straight up ignore all hidden files, for now
-	  (if (not (equal (aref (car entry) 0) ?.))
-		  ;; If directory, recurse
-		  ;; (also make sure not to recurse . or .. :D )
-		  (if (and (car (cdr entry))
-				   (not (equal (car entry) "."))
-				   (not (equal (car entry) "..")))
-			  (setq file-list (append file-list (cesp--get-files (concat dir "/" (car entry)) )))
-			;; Otherwise, add to list
-			(setq file-list (cons (concat dir "/" (car entry)) file-list)))))
-	file-list))
-
 (defun cesp--handle-before(beg end)
   "Handle things that happen before edits are made.
 Handler function with BEG and END."
@@ -383,18 +367,6 @@ contents."
   ;; Initiate cesp-mode
   (cesp-mode 1)
   (setq-local cesp--initialized t))
-
-;; (defun cesp--lie-about-file-name(file)
-;;   "Function which intercepts `buffer-file-name' to lie.
-;; If `buffer-file-name' returns a real buffer name, everything
-;; works normally. However, if it is nil, and the buffer is marked
-;; as an Cesp buffer, this will instead return the `buffer-name'.
-;; This effectively lies to Emacs in order to get it to activate
-;; the correct modes automatically"
-;;   (or file
-;; 	  (buffer-name)))
-;; (advice-add 'buffer-file-name :filter-return #'cesp--lie-about-file-name)
-;; (advice-remove 'buffer-file-name #'cesp--lie-about-file-name)
 
 (defun cesp--render-cursor(id position buffer name &optional startpos)
   "Renders cursor ID at POSITION in BUFFER.
