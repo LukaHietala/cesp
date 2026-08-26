@@ -3,10 +3,7 @@ local buffer = require("cesp.buffer")
 local utils = require("cesp.utils")
 
 local M = {}
--- Client's state
 M.state = {}
--- Are writes from client allowed (scary)
-M.allow_remote_write = false
 
 -- Sends event to the server
 function M.send_event(event_table)
@@ -36,54 +33,19 @@ function M.handle_event(json_str)
 
 	-- After handshake server sends client metadata (mirrored on server)
 	if payload.event == "handshake_response" then
-		if
-			payload.id == nil
-			or payload.name == nil
-			or payload.is_host == nil
-		then
+		if payload.id == nil or payload.name == nil then
 			return
 		end
 
 		M.state = {
 			id = payload.id,
 			name = payload.name,
-			is_host = payload.is_host,
 		}
 
 		print("Joined as " .. M.state.name)
 		return
 	end
 
-	-- If new host is assigned update state if necessary
-	if payload.event == "new_host" then
-		if payload.host_id == nil then
-			return
-		end
-
-		-- If new host is self update state
-		if payload.host_id == M.state.id then
-			print("You're the new host!")
-			M.state.is_host = true
-		else
-			print(payload.name .. " is the new host!")
-		end
-
-		return
-	end
-
-	-- Received request for filetree
-	if payload.event == "request_files" then
-		local file_list = utils.get_files()
-
-		M.send_event({
-			event = "response_files",
-			files = file_list,
-			request_id = payload.request_id,
-		})
-		return
-	end
-
-	-- Received response with filetree
 	if payload.event == "response_files" then
 		vim.schedule(function()
 			if payload.files and #payload.files > 0 then
@@ -102,29 +64,6 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- Received request for spesific file contents
-	if payload.event == "request_file" then
-		if M.state.is_host then
-			utils.ensure_host_buffer(payload.path)
-		end
-		-- Get content from open buffer or disk
-		local content = utils.get_file_content(payload.path)
-
-		-- Don't send an empty file
-		if not content then
-			return
-		end
-
-		M.send_event({
-			event = "response_file",
-			path = payload.path,
-			content = content,
-			request_id = payload.request_id,
-		})
-		return
-	end
-
-	-- Received file response with file content
 	if payload.event == "response_file" then
 		local content = payload.content
 		local path = payload.path
@@ -162,11 +101,7 @@ function M.handle_event(json_str)
 		local changes = payload.changes
 
 		vim.schedule(function()
-			local bufnr = utils.find_buffer_by_rel_path(path)
-
-			if M.state.is_host then
-				bufnr = utils.ensure_host_buffer(path)
-			end
+			local bufnr = utils.find_buffer_by_name(path)
 
 			if
 				bufnr
@@ -179,7 +114,6 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- Event that contains client's cursor positions
 	if payload.event == "cursor_move" then
 		vim.schedule(function()
 			cursor.handle_cursor_move(payload)
@@ -187,7 +121,6 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- Signals that client's cursor has scampered
 	if payload.event == "cursor_leave" then
 		vim.schedule(function()
 			cursor.handle_cursor_leave(payload)
@@ -195,7 +128,6 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- User joined event
 	if payload.event == "user_joined" then
 		if not payload.name then
 			return
@@ -205,7 +137,6 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- User left id
 	if payload.event == "user_left" then
 		if not payload.name then
 			return
@@ -215,33 +146,10 @@ function M.handle_event(json_str)
 		return
 	end
 
-	-- User sent request to write file
-	if payload.event == "remote_write" then
-		if not M.state.is_host then
-			return
-		end
-
-		if not M.allow_remote_write then
-			return
-		end
-
-		local path = payload.path
-		local requestor_name = payload.name or "???"
-		local bufnr = utils.find_buffer_by_rel_path(path)
-
-		-- If buffer is open/valid/loaded :kisumirri:
-		if
-			bufnr
-			and vim.api.nvim_buf_is_valid(bufnr)
-			and vim.api.nvim_buf_is_loaded(bufnr)
-		then
-			vim.api.nvim_buf_call(bufnr, function()
-				vim.cmd("silent! write")
-			end)
-			print(requestor_name .. " wrote to " .. path)
-		else
-			print("Failed to save " .. path .. " (buffer not loaded on host)")
-		end
+	if payload.event == "ping" then
+		M.send_event({
+			event = "pong",
+		})
 		return
 	end
 

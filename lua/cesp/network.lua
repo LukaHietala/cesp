@@ -38,7 +38,7 @@ local function on_read()
 	end
 end
 
-function M.start_client(ip, is_host)
+function M.start_client(ip)
 	if M.handle then
 		if not M.handle:is_closing() then
 			print("Already connected, try again")
@@ -61,7 +61,6 @@ function M.start_client(ip, is_host)
 		events.send_event({
 			event = "handshake",
 			name = config.name,
-			host = is_host,
 		})
 
 		vim.schedule(function()
@@ -114,8 +113,6 @@ function M.stop()
 
 	vim.schedule(function()
 		cursor.clear_all_remote_cursors()
-		events.state.is_host = false
-		events.state.client_id = nil
 	end)
 
 	print("Closed connection")

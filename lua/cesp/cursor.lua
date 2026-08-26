@@ -49,7 +49,7 @@ function M.start_cursor_tracker()
 	vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufEnter" }, {
 		group = CURSOR_GROUP,
 		callback = function()
-			local path = utils.get_rel_path(0)
+			local path = utils.get_buf_path(0)
 			if not path or path == "" then
 				return
 			end
@@ -86,7 +86,7 @@ function M.handle_cursor_move(payload)
 	local extmark_id = client_id + 1
 	local row, col = payload.position[1], payload.position[2]
 	local name = payload.name or "???"
-	local target_buf = utils.find_buffer_by_rel_path(payload.path)
+	local target_buf = utils.find_buffer_by_name(payload.path)
 	local config = require("cesp.config").config
 
 	-- If client moved to a different buffer, clear them from the old one

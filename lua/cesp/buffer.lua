@@ -39,11 +39,7 @@ function M.attach_buf_listener(buf, on_change)
 		return
 	end
 
-	local path = utils.get_rel_path(buf)
-	if not path then
-		print("Buffer outside project root, not applying listener")
-		return
-	end
+	local path = utils.get_buf_path(buf)
 
 	vim.api.nvim_buf_attach(buf, false, {
 		on_lines = function(_, _, _, first, old_last, new_last)
