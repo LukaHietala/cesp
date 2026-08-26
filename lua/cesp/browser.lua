@@ -83,21 +83,21 @@ function M.open_file_browser(files, on_select)
 	end
 end
 
-function M.open_remote_file(path, content, on_complete)
+function M.open_remote_file(name, content, on_complete)
 	local utils = require("cesp.utils")
 
 	vim.schedule(function()
-		local buf = utils.find_buffer_by_rel_path(path)
+		local buf = utils.find_buffer_by_name(name)
 
 		if not buf then
 			buf = vim.api.nvim_create_buf(true, true)
-			pcall(vim.api.nvim_buf_set_name, buf, path)
+			pcall(vim.api.nvim_buf_set_name, buf, name)
 
 			vim.bo[buf].buftype = "acwrite"
 			vim.bo[buf].swapfile = false
 			vim.bo[buf].bufhidden = "hide"
 
-			local ft = vim.filetype.match({ filename = path })
+			local ft = vim.filetype.match({ filename = name })
 			if ft then
 				vim.bo[buf].filetype = ft
 			end

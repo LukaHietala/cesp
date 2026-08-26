@@ -2,13 +2,13 @@
 
 A protocol and implementations for live file sharing via a protocol and server
 that works across multiple editors and operating systems, intended to be quite
-minimal in it's feature set.  
+minimal in it's feature set.
 Cesp does **not** currently have any sort of methods for preventing data
 corruption. You are expected to be sitting with your pal and being vigilant
 about any problems. Whether or not such features will be implemented is up
-in the air.  
+in the air.
 Not all editors will work 100% the same, but Cesp should guarantee reasonable
-stability.  
+stability.
 
 | Editor | Status |
 | ------ | ------- |
@@ -66,18 +66,10 @@ cesp.setup({
 To use Cesp, the host machine should first start up the server via:
 ```bash
 # cesp/server/
-go run server.go
+go run . -port=8080 -ignore=.vscode,node_modules /path/to/project
 ```
 
 Following this, usage of Cesp in-editor is generally speaking always the same.
-The host must be the first person to join the server, after which anyone else
-may freely join.
-
-The host should open files via their usual methods, whereas clients can open
-files from the host by using a specific Cesp command.
-
-If the host has allowed it, clients can also remotely write files, which works
-by simply writing files as usual, as the normal action is overriden in Cesp buffers.
 
 ### Emacs
 
@@ -97,8 +89,6 @@ You can use the following commands:
 
 - `:CespJoin`: Join a session. Defaults to localhost, but you can specify
   the server's address by adding it as an argument (`:CespJoin 123.123.123.123`)
-  or via interactive usage
 - `:CespLeave`: Leave the session.
 - `:CespExplore`: List all of the host's files. If you have the Telescope plugin
   installed this will be much nicer.
-
