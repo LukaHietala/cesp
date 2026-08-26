@@ -20,7 +20,6 @@ import (
 )
 
 // TODO:
-// Save all bufs when os signal
 // SSH Tunnel (autossh like)
 // JSON v2
 
@@ -133,6 +132,8 @@ func NewServer(addr, rootDir string, ignoredDirs map[string]bool) *Server {
 }
 
 func (s *Server) Stop() {
+	// Save all the buffers
+	s.session.FlushAll()
 	// Signals to all goroutines to die
 	close(s.quit)
 	// Stop accepting new connections
@@ -400,6 +401,18 @@ func (s *Session) GetBuffer(path string) *Buffer {
 	// Thread-safe (sync map)
 	actual, _ := s.buffers.LoadOrStore(path, b)
 	return actual.(*Buffer)
+}
+
+// Saves all buffers
+func (s *Session) FlushAll() {
+	s.buffers.Range(func(k, v any) bool {
+		b := v.(*Buffer)
+		err := b.Save(s.rootDir)
+		if err != nil {
+			log.Println(err)
+		}
+		return true
+	})
 }
 
 func NewBuffer(path string) *Buffer {
