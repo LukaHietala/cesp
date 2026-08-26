@@ -322,6 +322,8 @@ as appropriate. PROC is unused."
 				 (event (cdr (assoc 'event json))))
 			;;(message (concat "Event is: " event))
 			(cond
+			 ((string= "ping" event)
+			  (cesp--send '((event . "pong"))))
 			 ((string= "response_files" event)
 			  (cesp--open-file-menu (cdr (assoc 'files json))))
 			 ((string= "response_file" event)
