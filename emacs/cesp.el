@@ -321,28 +321,25 @@ as appropriate. PROC is unused."
 										  :array-type 'list))
 				 (event (cdr (assoc 'event json))))
 			;;(message (concat "Event is: " event))
-			(cond
-			 ((string= "ping" event)
-			  (cesp--send '((event . "pong"))))
-			 ((string= "response_files" event)
-			  (cesp--open-file-menu (cdr (assoc 'files json))))
-			 ((string= "response_file" event)
-			  (cesp--open-remote-file
-			   (cdr (assoc 'path json))
-			   (cdr (assoc 'content json))))
-			 ((string= "update_content" event)
-			  (cesp--update-content
-			   (cdr (assoc 'path json))
-			   (cdr (assoc 'changes json))))
-			 ((string= "cursor_move" event)
-			  (cesp--render-cursor
-			   (cdr (assoc 'from_id json))
-			   (cdr (assoc 'position json))
-			   (cdr (assoc 'path json))
-			   (cdr (assoc 'name json))
-			   (cdr (assoc 'start_pos (cdr (assoc 'selection json))))))
-			 ((string= "handshake_response" event)
-			  (cesp--connected json))))))))
+			(pcase json
+			  ((guard (string= "ping" event))
+			   (cesp--send '((event . "pong"))))
+			  ((guard (string= "handshake_response" event))
+			   (cesp--connected json))
+			  ((and (guard (string= "response_files" event))
+					(map files))
+			   (cesp--open-file-menu files))
+			  ((and (guard (string= "response_file" event))
+					(map path content))
+			   (cesp--open-remote-file path content))
+			  ((and (guard (string= "update_content" event))
+					(map path changes))
+			   (cesp--update-content path changes))
+			  ((and (guard (string= "cursor_move" event))
+					(map from_id position path name selection))
+			   (cesp--render-cursor
+				from_id position path name
+				(cdr (assoc 'start_pos selection))))))))))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
@@ -460,16 +457,14 @@ CHANGES is an alist with the changes specified as such:
 		  (set-buffer buffer)
 		  (save-restriction
 			(widen)
-			(let ((beg (cdr (assoc 'first changes)) )
-				  (end (cdr (assoc 'old_last changes)) )
-				  (lines (cdr (assoc 'lines changes)) ))
+			(pcase-let* (((map first old_last lines) changes))
 			  ;; Goto first line
 			  (goto-char (point-min))
-			  (forward-line beg)
+			  (forward-line first)
 			  ;; Replace lines iteratively
 			  ;; (also make sure this doesn't trigger the cesp after-change hook)
 			  (setq inhibit-modification-hooks t)
-			  (dotimes (_ (- end beg))
+			  (dotimes (_ (- old_last first))
 				(delete-line))
 			  (dolist (line lines)
 				(insert (concat line "\n")))
