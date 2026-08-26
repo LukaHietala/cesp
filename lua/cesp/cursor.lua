@@ -11,6 +11,8 @@ local NS_SELECT = vim.api.nvim_create_namespace("cesp_selection")
 -- Track which buffer each remote client is currently in
 M.remote_clients = {}
 
+local following = ""
+
 -- Clears all client extmarks from buffer
 local function clear_client_from_buf(buf, extmark_id)
 	if
@@ -100,6 +102,27 @@ function M.handle_cursor_move(payload)
 	M.remote_clients[client_id] = { buf = target_buf, name = name }
 
 	-- Only draw if the buffer is actually loaded here
+	if following == payload.name then
+		if not row or not col then
+			return
+		end
+		if
+			target_buf
+			and vim.api.nvim_buf_is_valid(target_buf)
+			and vim.api.nvim_buf_is_loaded(target_buf)
+		then
+			vim.api.nvim_set_current_buf(target_buf)
+		else
+			events.send_event({
+				event = "request_file",
+				path = payload.path,
+			})
+		end
+
+		vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
+		vim.cmd.normal({ bang = true, "zz" })
+	end
+
 	if
 		not target_buf
 		or not vim.api.nvim_buf_is_valid(target_buf)
@@ -139,6 +162,11 @@ function M.handle_cursor_move(payload)
 		-- Clear selection if they aren't in visual mode anymore
 		pcall(vim.api.nvim_buf_del_extmark, target_buf, NS_SELECT, extmark_id)
 	end
+end
+
+function M.follow(name)
+	following = name
+	print("Following " .. name)
 end
 
 return M

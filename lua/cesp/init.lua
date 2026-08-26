@@ -26,6 +26,21 @@ function M.setup(opts)
 		browser.list_remote_files()
 	end, {})
 
+	vim.api.nvim_create_user_command("CespFollow", function(args)
+		local cursor = require("cesp.cursor")
+		local name = args.args
+		if name == "" then
+			print("Provide a name")
+			return
+		end
+		cursor.follow(name)
+	end, { nargs = "?" })
+
+	vim.api.nvim_create_user_command("CespUnfollow", function()
+		local cursor = require("cesp.cursor")
+		cursor.follow("")
+	end, {})
+
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			network.stop()
