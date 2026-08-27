@@ -13,7 +13,7 @@ stability.
 | Editor | Status |
 | ------ | ------- |
 | Neovim | Works |
-| Emacs  | Works as a client but not host |
+| Emacs  | Works |
 | Vscode | Someday |
 | Vim    | Possibly someday |
 

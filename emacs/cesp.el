@@ -363,7 +363,8 @@ contents."
   (insert content)
   ;; Try to activate appropriate major and minor modes.
   ;; This could definitely be better
-  (funcall (cdr (assoc (buffer-name) auto-mode-alist 'string-match-p)))
+  (if-let ((mode (cdr (assoc (buffer-name) auto-mode-alist 'string-match-p)))) 
+	  (funcall mode))
   ;; Initiate cesp-mode
   (cesp-mode 1)
   (setq-local cesp--initialized t))
