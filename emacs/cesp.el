@@ -82,7 +82,7 @@ Format is:
 ;;;; Connection management
 
 ;;;###autoload
-(defun cesp-connect-server(host port owner)
+(defun cesp-connect-server(host port)
   "Connects to a Cesp server.
 This connects your Emacs session to a Cesp server
 at HOST PORT, for example localhost 8080
@@ -435,14 +435,14 @@ CHANGES is an alist with the changes specified as such:
 		  (set-buffer buffer)
 		  (save-restriction
 			(widen)
-			(pcase-let* (((map first old_last lines) changes))
+			(pcase-let* (((map first ('old_last old-last) lines) changes))
 			  ;; Goto first line
 			  (goto-char (point-min))
 			  (forward-line first)
 			  ;; Replace lines iteratively
 			  ;; (also make sure this doesn't trigger the cesp after-change hook)
 			  (setq inhibit-modification-hooks t)
-			  (dotimes (_ (- old_last first))
+			  (dotimes (_ (- old-last first))
 				(delete-line))
 			  (dolist (line lines)
 				(insert (concat line "\n")))
