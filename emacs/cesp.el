@@ -87,15 +87,12 @@ Format is:
 This connects your Emacs session to a Cesp server
 at HOST PORT, for example localhost 8080
 which is the default for a Cesp server.
-OWNER specifies whether or not you wish to become
-the host, if possible.
 
 It will then perform the handshake, giving your
 name as per the variable"
   (interactive
    (list (read-string "Server hostname: ")
-		 (read-string "Server port: ")
-		 (y-or-n-p "Become host if possible? ")))
+		 (read-string "Server port: ")))
   (if (not (cesp-connected-p))
 	  (progn
 		(setq cesp-server-process (make-network-process
@@ -107,8 +104,7 @@ name as per the variable"
 								   :filter #'cesp--filter
 								   :sentinel #'cesp--sentinel))
 		;; Perform handshake
-		(cesp--send `((event . "handshake") (name . ,cesp-name) (host . ,(or owner
-																			 :false)))))
+		(cesp--send `((event . "handshake") (name . ,cesp-name) )))
 	(error "You are already connected to a server!")))
 
 ;;;###autoload
@@ -323,7 +319,10 @@ as appropriate. PROC is unused."
 					(map from_id position path name selection))
 			   (cesp--render-cursor
 				from_id position path name
-				(cdr (assoc 'start_pos selection))))))))))
+				(cdr (assoc 'start_pos selection))))
+			  ((and (guard (string= "cursor_leave" event))
+					(map client_id))
+			   (cesp--delete-cursor client_id))))))))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
@@ -405,15 +404,21 @@ and position is highlighted."
 		  (move-overlay (car overlay-pair) pos pos2 buf)
 		  (move-overlay (car (cdr overlay-pair)) line-end (1- line-end) buf)))))
 
+(defun cesp--delete-cursor(client_id)
+  "Deletes cursor CLIENT_ID."
+  (dolist (o (cdr (assoc client_id cesp-cursors)))
+	(delete-overlay o)
+	(delete-overlay o))
+  (setq cesp-cursors (map-delete cesp-cursors 1)))
+   
 (defun cesp--clear-cursors()
   "Deletes other peoples cursors.
 Mainly for debugging but also used when
 disconnected."
-  (progn
 	(dolist (o cesp-cursors)
 	  (delete-overlay (car (cdr o)))
 	  (delete-overlay (car (cdr (cdr o)))))
-	(setq cesp-cursors nil)))
+	(setq cesp-cursors nil))
 
 (defun cesp--update-content(path changes)
   "Handler function which will apply change to buffer PATH.
