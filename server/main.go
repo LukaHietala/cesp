@@ -1,11 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -182,7 +181,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	// Write pump
 	go func() {
-		encoder := json.NewEncoder(conn)
 		for {
 			select {
 			case <-ctx.Done():
@@ -193,9 +191,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 					return
 				}
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				err := encoder.Encode(msg)
+				err := Encode(conn, msg)
 				if err != nil {
-					log.Println("write error", err)
+					log.Printf("decode error to %s: %v\n", conn.RemoteAddr(), err)
 					cancel()
 					return
 				}
@@ -225,49 +223,29 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	// Max 5MB buffer
-	const maxCap = 1024 * 1024 * 5
-	scanner := bufio.NewScanner(conn)
-	buf := make([]byte, maxCap)
-	scanner.Buffer(buf, maxCap)
-
 	// Read pump
 	for {
 		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 
-		if !scanner.Scan() {
-			break
-		}
-
-		// If write is broken die
-		if ctx.Err() != nil {
-			break
-		}
-
-		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
-
-		text := strings.TrimSpace(scanner.Text())
-		if text == "" {
-			continue
-		}
-
-		log.Println("Received", text)
-
 		var msg EventMessage
-		err := json.Unmarshal([]byte(text), &msg)
+
+		err := Decode(conn, &msg)
 		if err != nil {
-			log.Printf("Invalid JSON payload from %s: %v\n", conn.RemoteAddr(), err)
-			continue
+			if ctx.Err() != nil {
+				break
+			}
+			if err != io.EOF {
+				log.Printf("decode error from %s: %v\n", conn.RemoteAddr(), err)
+			}
+			break
 		}
+
+		log.Println("Received event:", msg.Event) // TODO: raw data, debug flag
 
 		err = s.handleEvent(msg, client, conn)
 		if err != nil {
 			log.Println("event error", err)
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Println(err)
 	}
 }
 
