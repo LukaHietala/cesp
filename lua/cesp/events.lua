@@ -1,3 +1,4 @@
+local bit = require("bit")
 local browser = require("cesp.browser")
 local buffer = require("cesp.buffer")
 local utils = require("cesp.utils")
@@ -5,11 +6,9 @@ local utils = require("cesp.utils")
 local M = {}
 M.state = {}
 
--- Sends event to the server
 function M.send_event(event_table)
 	local network = require("cesp.network")
 
-	-- Don't try to write to non-existing handle/pipe
 	if not network.handle or network.handle:is_closing() then
 		print("Unable to send the event, maybe join?")
 		return
@@ -17,8 +16,17 @@ function M.send_event(event_table)
 
 	local event_str = utils.encode_json(event_table)
 	if event_str then
-		-- Server uses \n as delimeter
-		network.handle:write(event_str .. "\n")
+		local payload_len = #event_str
+
+		-- Make payload len big endian uint32
+		local l1 = bit.band(bit.rshift(payload_len, 24), 0xFF)
+		local l2 = bit.band(bit.rshift(payload_len, 16), 0xFF)
+		local l3 = bit.band(bit.rshift(payload_len, 8), 0xFF)
+		local l4 = bit.band(payload_len, 0xFF)
+
+		-- Magic bytes are C and E
+		local header = string.char(0x0C, 0x0E, l1, l2, l3, l4)
+		network.handle:write(header .. event_str)
 	end
 end
 
