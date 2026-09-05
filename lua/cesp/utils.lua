@@ -25,6 +25,7 @@ function M.get_buf_path(bufnr)
 end
 
 function M.find_buffer_by_name(name)
+	-- DELICIOUS iterators
 	return vim.iter(vim.api.nvim_list_bufs())
 		:filter(vim.api.nvim_buf_is_valid)
 		:find(function(buf)

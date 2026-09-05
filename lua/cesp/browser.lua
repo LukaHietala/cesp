@@ -1,86 +1,28 @@
 local M = {}
 
--- Sends request for host's filetree
 function M.list_remote_files()
 	local events = require("cesp.events")
 	events.send_event({
-		event = "request_files",
+		e = "fs:list",
 	})
-end
-
-local function open_with_telescope(files, on_select)
-	local pickers = require("telescope.pickers")
-	local finders = require("telescope.finders")
-	local conf = require("telescope.config").values
-	local themes = require("telescope.themes")
-	local actions = require("telescope.actions")
-	local action_state = require("telescope.actions.state")
-
-	local opts = themes.get_ivy({
-		prompt_title = "Remote files",
-	})
-
-	pickers
-		.new(opts, {
-			finder = finders.new_table({
-				results = files,
-			}),
-			sorter = conf.generic_sorter({}),
-			attach_mappings = function(prompt_bufnr)
-				actions.select_default:replace(function()
-					local selection = action_state.get_selected_entry()
-					actions.close(prompt_bufnr)
-					if selection then
-						on_select(selection[1])
-					end
-				end)
-				return true
-			end,
-		})
-		:find()
-end
-
--- Used when Telescope is not installed. Asks for input first to filter, then selects
-local function open_with_fallback(files, on_select)
-	vim.ui.input(
-		{ prompt = "Filter files (leave empty for all): " },
-		function(input)
-			if input == nil then
-				return
-			end
-
-			local filtered = files
-			if input ~= "" then
-				filtered = vim.tbl_filter(function(file)
-					return file:lower():find(input:lower(), 1, true) ~= nil
-				end, files)
-			end
-
-			if #filtered == 0 then
-				print("No matches found")
-				return
-			end
-
-			vim.ui.select(filtered, {
-				prompt = "Select remote file:",
-				kind = "file",
-			}, function(choice)
-				if choice then
-					on_select(choice)
-				end
-			end)
-		end
-	)
 end
 
 function M.open_file_browser(files, on_select)
-	local has_telescope, _ = pcall(require, "telescope")
-
-	if has_telescope then
-		open_with_telescope(files, on_select)
-	else
-		open_with_fallback(files, on_select)
+	if #files == 0 then
+		print("No remote files found")
+		return
 	end
+
+	vim.ui.select(files, {
+		prompt = "Select remote file:",
+		format_item = function(item)
+			return item
+		end,
+	}, function(choice)
+		if choice then
+			on_select(choice)
+		end
+	end)
 end
 
 function M.open_remote_file(name, content, on_complete)

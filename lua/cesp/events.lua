@@ -34,13 +34,19 @@ end
 function M.handle_event(json_str)
 	local cursor = require("cesp.cursor")
 	-- Get event details
-	local payload = utils.decode_json(json_str)
-	if not payload or not payload.event then
+	local payload_json = utils.decode_json(json_str)
+	if not payload_json then
 		return
 	end
 
-	-- After handshake server sends client metadata (mirrored on server)
-	if payload.event == "handshake_response" then
+	local event = payload_json.e
+	local payload = payload_json.p
+
+	if not payload or not event then
+		return
+	end
+
+	if event == "auth:handshake_res" then
 		if payload.id == nil or payload.name == nil then
 			return
 		end
@@ -54,15 +60,17 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "response_files" then
+	if event == "fs:list_res" then
 		vim.schedule(function()
 			if payload.files and #payload.files > 0 then
 				-- If files in response open explorer with them
 				browser.open_file_browser(payload.files, function(path)
 					-- On select request for selected file
 					M.send_event({
-						event = "request_file",
-						path = path,
+						e = "doc:open",
+						p = {
+							path = path,
+						},
 					})
 				end)
 			else
@@ -72,7 +80,7 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "response_file" then
+	if event == "doc:open_res" then
 		local content = payload.content
 		local path = payload.path
 
@@ -85,9 +93,11 @@ function M.handle_event(json_str)
 			-- Attach listeners to it
 			buffer.attach_buf_listener(buf, function(p, c)
 				M.send_event({
-					event = "update_content",
-					path = p,
-					changes = c,
+					e = "doc:update",
+					p = {
+						path = p,
+						changes = c,
+					},
 				})
 			end)
 
@@ -95,8 +105,10 @@ function M.handle_event(json_str)
 				buffer = buf,
 				callback = function()
 					M.send_event({
-						event = "remote_write",
-						path = path,
+						e = "doc:save",
+						p = {
+							path = path,
+						},
 					})
 				end,
 			})
@@ -104,7 +116,7 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "update_content" then
+	if event == "doc:update" then
 		local path = payload.path
 		local changes = payload.changes
 
@@ -122,21 +134,21 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "cursor_move" then
+	if event == "cursor:move" then
 		vim.schedule(function()
 			cursor.handle_cursor_move(payload)
 		end)
 		return
 	end
 
-	if payload.event == "cursor_leave" then
+	if event == "cursor:leave" then
 		vim.schedule(function()
 			cursor.handle_cursor_leave(payload)
 		end)
 		return
 	end
 
-	if payload.event == "user_joined" then
+	if event == "user:join" then
 		if not payload.name then
 			return
 		end
@@ -145,7 +157,7 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "user_left" then
+	if event == "user:leave" then
 		if not payload.name then
 			return
 		end
@@ -154,14 +166,14 @@ function M.handle_event(json_str)
 		return
 	end
 
-	if payload.event == "ping" then
+	if event == "ping" then
 		M.send_event({
 			event = "pong",
 		})
 		return
 	end
 
-	if payload.event == "error" then
+	if event == "server:error" then
 		if not payload.message then
 			return
 		end
@@ -170,7 +182,7 @@ function M.handle_event(json_str)
 		return
 	end
 
-	print("Not implemented :( " .. payload.event)
+	print("Not implemented :( " .. event)
 end
 
 return M

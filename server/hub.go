@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync/atomic"
@@ -48,7 +49,7 @@ func NewClient(conn net.Conn) *Client {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan Message),
+		broadcast:  make(chan Message, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		shutdown:   make(chan struct{}),
@@ -76,16 +77,36 @@ func (h *Hub) Run() {
 
 		case client := <-h.unregister:
 			delete(h.clients, client)
-			go func() {
-				h.broadcast <- Message{
-					sender: nil,
-					payload: UserJoinedOrLeft{
-						Event: "user_left",
-						ID:    client.id,
-						Name:  client.name,
-					}}
-			}()
 
+			if client.name == "" {
+				continue
+			}
+
+			go func() {
+				clientIDStr := fmt.Sprintf("%d", client.id)
+
+				userPayload, err := json.Marshal(UserPayload{
+					ID:   clientIDStr,
+					Name: client.name,
+				})
+				if err != nil {
+					return
+				}
+
+				leaveEvent := Event{
+					Type:    "user:leave",
+					Payload: userPayload,
+				}
+
+				select {
+				case h.broadcast <- Message{
+					sender:  nil,
+					payload: leaveEvent,
+				}:
+				case <-h.shutdown:
+					return
+				}
+			}()
 		case msg := <-h.broadcast:
 			for client := range h.clients {
 				if client.conn == msg.sender {
