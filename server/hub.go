@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"sync/atomic"
 )
 
@@ -83,7 +84,7 @@ func (h *Hub) Run() {
 			}
 
 			go func() {
-				clientIDStr := fmt.Sprintf("%d", client.id)
+				clientIDStr := strconv.FormatUint(client.id, 10)
 
 				userPayload, err := json.Marshal(UserPayload{
 					ID:   clientIDStr,

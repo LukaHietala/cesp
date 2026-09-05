@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -171,7 +172,7 @@ func marshalPayload(v any) json.RawMessage {
 }
 
 func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
-	clientIDStr := fmt.Sprintf("%d", client.id)
+	clientIDStr := strconv.FormatUint(client.id, 10)
 
 	switch ev.Type {
 	case "fs:list":
