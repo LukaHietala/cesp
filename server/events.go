@@ -1,49 +1,56 @@
 package main
 
-type EventMessage struct {
-	Event     string     `json:"event"`
-	FromID    uint64     `json:"from_id,omitempty"`
-	Path      string     `json:"path,omitempty"`
-	Name      string     `json:"name,omitempty"`
-	Changes   *Changes   `json:"changes,omitempty"`
-	Position  []int      `json:"position,omitempty"`
-	Selection *Selection `json:"selection,omitempty"`
+import (
+	"encoding/json"
+)
+
+type Event struct {
+	Type    string          `json:"e"`
+	Payload json.RawMessage `json:"p,omitempty"`
 }
 
-type Selection struct {
-	StartPos []int `json:"start_pos"`
-	// Regular pos is used as end :)
-}
-
-type Changes struct {
-	First   int      `json:"first"`
-	OldLast int      `json:"old_last"`
-	Lines   []string `json:"lines"`
-}
-
-type ResponseFiles struct {
-	Event string   `json:"event"`
+type FSListResPayload struct {
 	Files []string `json:"files"`
 }
 
-type ResponseFile struct {
-	Event   string `json:"event"`
+type DocPathPayload struct {
+	Path string `json:"path"`
+}
+
+type DocOpenResPayload struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
-type HandshakeReponse struct {
-	Event string `json:"event"`
-	Name  string `json:"name"`
-	ID    uint64 `json:"id"`
+type DocUpdatePayload struct {
+	Path  string   `json:"path"`
+	Range [2]int   `json:"range"` // [start_row, end_row]
+	Lines []string `json:"lines"`
 }
 
-type UserJoinedOrLeft struct {
-	Event string `json:"event"`
-	Name  string `json:"name"`
-	ID    uint64 `json:"id"`
+type CursorMovePayload struct {
+	ID   string `json:"id,omitempty"`   // Added by server
+	Name string `json:"name,omitempty"` // Added by server
+	Path string `json:"path"`
+	Pos  [2]int `json:"pos"` // [row, col]
 }
 
-type PingEvent struct {
-	Event string `json:"event"`
+type CursorRangePayload struct {
+	ID    string `json:"id,omitempty"`   // Added by server
+	Name  string `json:"name,omitempty"` // Added by server
+	Path  string `json:"path"`
+	Range [4]int `json:"range"` // [start_row, start_col, end_row, end_col]
+}
+
+type AuthHandshakePayload struct {
+	Name string `json:"name"`
+}
+
+type UserPayload struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type ServerErrorPayload struct {
+	Message string `json:"msg"`
 }

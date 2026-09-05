@@ -37,7 +37,7 @@ function M.clear_all_remote_cursors()
 end
 
 function M.handle_cursor_leave(payload)
-	local client_id = payload.from_id
+	local client_id = payload.id
 	if not client_id or not M.remote_clients[client_id] then
 		return
 	end
@@ -58,10 +58,12 @@ function M.start_cursor_tracker()
 
 			local cursor_pos = vim.api.nvim_win_get_cursor(0)
 			local payload = {
-				event = "cursor_move",
-				-- Make 0- indexed
-				position = { cursor_pos[1] - 1, cursor_pos[2] },
-				path = path,
+				e = "cursor:move",
+				p = {
+					-- Make 0- indexed
+					pos = { cursor_pos[1] - 1, cursor_pos[2] },
+					path = path,
+				},
 			}
 
 			-- On visual mode add hightlight start_pos to cursor_move
@@ -80,13 +82,13 @@ function M.start_cursor_tracker()
 end
 
 function M.handle_cursor_move(payload)
-	local client_id = payload.from_id
+	local client_id = payload.id
 	if not client_id or not payload.path then
 		return
 	end
 
 	local extmark_id = client_id + 1
-	local row, col = payload.position[1], payload.position[2]
+	local row, col = payload.pos[1], payload.pos[2]
 	local name = payload.name or "???"
 	local target_buf = utils.find_buffer_by_name(payload.path)
 	local config = require("cesp.config").config
@@ -114,8 +116,10 @@ function M.handle_cursor_move(payload)
 			vim.api.nvim_set_current_buf(target_buf)
 		else
 			events.send_event({
-				event = "request_file",
-				path = payload.path,
+				e = "doc:open",
+				p = {
+					path = payload.path,
+				},
 			})
 		end
 
