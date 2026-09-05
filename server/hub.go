@@ -100,7 +100,7 @@ func (h *Hub) Run() {
 
 				select {
 				case h.broadcast <- Message{
-					sender:  nil,
+					sender:  client.conn,
 					payload: leaveEvent,
 				}:
 				case <-h.shutdown:

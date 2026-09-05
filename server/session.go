@@ -21,14 +21,19 @@ func (s *Session) GetBuffer(path string) *Buffer {
 	}
 
 	b := NewBuffer(path)
+	actual, loaded := s.buffers.LoadOrStore(path, b)
+	if loaded {
+		// Another conn got it before
+		return actual.(*Buffer)
+	}
+
 	content, err := fs.ReadFile(s.fsys, path)
 	if err == nil {
 		lines := strings.Split(string(content), "\n")
-		b.SetLines(0, -1, lines)
+		b.SetLines(0, len(b.lines), lines)
 	}
 
-	actual, _ := s.buffers.LoadOrStore(path, b)
-	return actual.(*Buffer)
+	return b
 }
 
 // Saves all buffers

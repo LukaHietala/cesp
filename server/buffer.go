@@ -37,7 +37,12 @@ func (b *Buffer) Save(rootDir string) error {
 
 	fullPath := filepath.Join(rootDir, b.path)
 
-	return os.WriteFile(fullPath, []byte(content), 0644)
+	mode := os.FileMode(0644)
+	if info, err := os.Stat(fullPath); err == nil {
+		mode = info.Mode()
+	}
+
+	return os.WriteFile(fullPath, []byte(content), mode)
 }
 
 // GetLines returns a slice of lines between start and end (exclusive)
@@ -75,7 +80,7 @@ func (b *Buffer) SetLines(start, end int, replacement []string) error {
 
 func normalizeIndex(index, length int) int {
 	if index < 0 {
-		index = length + index
+		index = length + index + 1
 	}
 	return max(0, min(index, length))
 }

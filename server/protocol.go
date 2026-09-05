@@ -1,11 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json/v2"
 	"errors"
 	"io"
-	"net"
+	"sync"
 )
 
 // Protocol (Big-Endian):
@@ -31,25 +32,40 @@ var (
 	ErrInvalidMagic    = errors.New("invalid magic bytes")
 )
 
+var bufPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 1024))
+	},
+}
+
 func Encode(w io.Writer, v any) error {
-	// TODO: MarshalWrite, sync pool to recyle memory
-	payload, err := json.Marshal(v)
-	if err != nil {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
+	defer func() {
+		if buf.Cap() <= 64*1024 {
+			bufPool.Put(buf)
+		}
+	}()
+
+	buf.Write([]byte{0, 0, 0, 0, 0, 0})
+
+	if err := json.MarshalWrite(buf, v); err != nil {
 		return err
 	}
 
-	payloadLen := len(payload)
+	b := buf.Bytes()
+	payloadLen := len(b) - HeaderSize
 	if payloadLen > MaxPayloadSize {
 		return ErrPayloadTooLarge
 	}
 
-	var header [HeaderSize]byte
-	header[0] = MagicByte1
-	header[1] = MagicByte2
-	binary.BigEndian.PutUint32(header[2:6], uint32(payloadLen))
+	b[0] = MagicByte1
+	b[1] = MagicByte2
+	binary.BigEndian.PutUint32(b[2:6], uint32(payloadLen))
 
-	buffers := net.Buffers{header[:], payload}
-	_, err = buffers.WriteTo(w)
+	_, err := w.Write(b)
+
 	return err
 }
 

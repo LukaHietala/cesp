@@ -59,7 +59,7 @@ func (s *Server) Stop() {
 
 func (s *Server) serve() {
 	defer s.wg.Done()
-	log.Println("Listening on", s.listener.Addr().String())
+	log.Println("listening on", s.listener.Addr().String())
 
 	for {
 		conn, err := s.listener.Accept()
@@ -88,10 +88,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		s.hub.unregister <- client
 		conn.Close()
-		log.Println("Connection closed", conn.RemoteAddr())
+		log.Println("connection closed", conn.RemoteAddr())
 	}()
 
-	log.Println("New connection", conn.RemoteAddr())
+	log.Println("new connection", conn.RemoteAddr())
 
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -141,7 +141,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			break
 		}
 
-		log.Println("Received event:", ev.Type)
+		log.Println("received event:", ev.Type)
 
 		err = s.handleEvent(ev, client, conn)
 		if err != nil {
