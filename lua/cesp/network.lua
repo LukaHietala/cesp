@@ -41,12 +41,7 @@ local function on_read()
 			-- Parse big-endian payload length using black magic
 			-- Neovim uses luaJIT 5.1 so no builtin string pack/unpack or bitwise :(
 			local l1, l2, l3, l4 = string.byte(buffer, 3, 6)
-			local payload_len = bit.bor(
-				bit.lshift(l1, 24),
-				bit.lshift(l2, 16),
-				bit.lshift(l3, 8),
-				l4
-			)
+			local payload_len = bit.bor(bit.lshift(l1, 24), bit.lshift(l2, 16), bit.lshift(l3, 8), l4)
 
 			-- Make sure it's unsigned 32-bit integer
 			payload_len = bit.tobit(payload_len) % 4294967296 -- 2^32

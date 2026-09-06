@@ -14,9 +14,7 @@ end
 
 -- Checks if buf is valid and loaded
 function M.is_valid_buf(buf)
-	return buf
-		and vim.api.nvim_buf_is_valid(buf)
-		and vim.api.nvim_buf_is_loaded(buf)
+	return buf and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_is_loaded(buf)
 end
 
 -- Gets path of buf that maps to server buf, "path/file.hs"
@@ -35,11 +33,9 @@ end
 -- Finds buffer name by name/path on server
 function M.find_buffer_by_name(name)
 	-- DELICIOUS iterators
-	return vim.iter(vim.api.nvim_list_bufs())
-		:filter(vim.api.nvim_buf_is_valid)
-		:find(function(buf)
-			return M.get_buf_path(buf) == name
-		end)
+	return vim.iter(vim.api.nvim_list_bufs()):filter(vim.api.nvim_buf_is_valid):find(function(buf)
+		return M.get_buf_path(buf) == name
+	end)
 end
 
 return M

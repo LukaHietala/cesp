@@ -8,7 +8,7 @@ M.is_applying = {}
 local utils = require("cesp.utils")
 
 -- Applies a single change to a buffer
-function M.apply_change(buf, change)
+function M.apply_change(buf, payload)
 	if not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
@@ -17,15 +17,16 @@ function M.apply_change(buf, change)
 		return
 	end
 
+	if not payload.range or not payload.lines then
+		return
+	end
+
+	local start_line = payload.range[1]
+	local end_line = payload.range[2]
+	local lines = payload.lines
+
 	M.is_applying[buf] = true
-	local ok, err = pcall(
-		vim.api.nvim_buf_set_lines,
-		buf,
-		change.first,
-		change.old_last,
-		false,
-		change.lines
-	)
+	local ok, err = pcall(vim.api.nvim_buf_set_lines, buf, start_line, end_line, false, lines)
 	M.is_applying[buf] = false
 
 	if not ok then
@@ -47,14 +48,9 @@ function M.attach_buf_listener(buf, on_change)
 				return
 			end
 
-			local lines =
-				vim.api.nvim_buf_get_lines(buf, first, new_last, false)
+			local lines = vim.api.nvim_buf_get_lines(buf, first, new_last, false)
 			on_change(path, {
-				-- First line number where change started
-				first = first,
-				-- Last line number where change ended
-				old_last = old_last,
-				-- Content in between
+				range = { first, old_last },
 				lines = lines,
 			})
 		end,

@@ -58,7 +58,10 @@ local events = {
 
 		browser.open_remote_file(payload.path, payload.content, function(buf)
 			buffer.attach_buf_listener(buf, function(p, c)
-				M.send_event({ e = "doc:update", p = { path = p, changes = c } })
+				M.send_event({
+					e = "doc:update",
+					p = { path = p, range = c.range, lines = c.lines },
+				})
 			end)
 			vim.api.nvim_create_autocmd("BufWriteCmd", {
 				buffer = buf,
@@ -73,7 +76,7 @@ local events = {
 		vim.schedule(function()
 			local bufnr = utils.find_buffer_by_name(payload.path)
 			if utils.is_valid_buf(bufnr) then
-				buffer.apply_change(bufnr, payload.changes)
+				buffer.apply_change(bufnr, payload)
 			end
 		end)
 	end,
@@ -112,7 +115,7 @@ local events = {
 	end,
 
 	["ping"] = function()
-		M.send_event({ event = "pong" })
+		M.send_event({ e = "pong" })
 	end,
 
 	["server:error"] = function(payload)
