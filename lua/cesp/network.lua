@@ -108,8 +108,6 @@ end
 
 function M.stop()
 	if M.handle then
-		events.send_event({ event = "cursor:leave" })
-
 		if not M.handle:is_closing() then
 			M.handle:close()
 		end

@@ -30,159 +30,113 @@ function M.send_event(event_table)
 	end
 end
 
--- Handles every event received from server
-function M.handle_event(json_str)
-	local cursor = require("cesp.cursor")
-	-- Get event details
-	local payload_json = utils.decode_json(json_str)
-	if not payload_json then
-		return
-	end
-
-	local event = payload_json.e
-	local payload = payload_json.p
-
-	if not payload or not event then
-		return
-	end
-
-	if event == "auth:handshake_res" then
-		if payload.id == nil or payload.name == nil then
+local events = {
+	["auth:handshake_res"] = function(payload)
+		if not payload.id or not payload.name then
 			return
 		end
-
-		M.state = {
-			id = payload.id,
-			name = payload.name,
-		}
-
+		M.state = { id = payload.id, name = payload.name }
 		print("Joined as " .. M.state.name)
-		return
-	end
+	end,
 
-	if event == "fs:list_res" then
+	["fs:list_res"] = function(payload)
 		vim.schedule(function()
 			if payload.files and #payload.files > 0 then
-				-- If files in response open explorer with them
 				browser.open_file_browser(payload.files, function(path)
-					-- On select request for selected file
-					M.send_event({
-						e = "doc:open",
-						p = {
-							path = path,
-						},
-					})
+					M.send_event({ e = "doc:open", p = { path = path } })
 				end)
 			else
 				print("No files received")
 			end
 		end)
-		return
-	end
+	end,
 
-	if event == "doc:open_res" then
-		local content = payload.content
-		local path = payload.path
-
-		if not content then
-			print("No content from " .. path)
+	["doc:open_res"] = function(payload)
+		if not payload.content then
+			print("No content from " .. payload.path)
 		end
 
-		-- Opens an empty buffer that mimics real file buffer
-		browser.open_remote_file(path, content, function(buf)
-			-- Attach listeners to it
+		browser.open_remote_file(payload.path, payload.content, function(buf)
 			buffer.attach_buf_listener(buf, function(p, c)
-				M.send_event({
-					e = "doc:update",
-					p = {
-						path = p,
-						changes = c,
-					},
-				})
+				M.send_event({ e = "doc:update", p = { path = p, changes = c } })
 			end)
-
 			vim.api.nvim_create_autocmd("BufWriteCmd", {
 				buffer = buf,
 				callback = function()
-					M.send_event({
-						e = "doc:save",
-						p = {
-							path = path,
-						},
-					})
+					M.send_event({ e = "doc:save", p = { path = payload.path } })
 				end,
 			})
 		end)
-		return
-	end
+	end,
 
-	if event == "doc:update" then
-		local path = payload.path
-		local changes = payload.changes
-
+	["doc:update"] = function(payload)
 		vim.schedule(function()
-			local bufnr = utils.find_buffer_by_name(path)
-
-			if
-				bufnr
-				and vim.api.nvim_buf_is_valid(bufnr)
-				and vim.api.nvim_buf_is_loaded(bufnr)
-			then
-				buffer.apply_change(bufnr, changes)
+			local bufnr = utils.find_buffer_by_name(payload.path)
+			if utils.is_valid_buf(bufnr) then
+				buffer.apply_change(bufnr, payload.changes)
 			end
 		end)
-		return
-	end
+	end,
 
-	if event == "cursor:move" then
+	["cursor:move"] = function(payload)
+		local cursor = require("cesp.cursor")
 		vim.schedule(function()
 			cursor.handle_cursor_move(payload)
 		end)
-		return
-	end
+	end,
 
-	if event == "cursor:leave" then
+	["cursor:range"] = function(payload)
+		local cursor = require("cesp.cursor")
+		vim.schedule(function()
+			cursor.handle_cursor_range(payload)
+		end)
+	end,
+
+	["user:join"] = function(payload)
+		if payload.name then
+			print(payload.name .. " joined!")
+		end
+	end,
+
+	["user:leave"] = function(payload)
+		local cursor = require("cesp.cursor")
+		if not payload.name then
+			return
+		end
+
 		vim.schedule(function()
 			cursor.handle_cursor_leave(payload)
 		end)
-		return
-	end
-
-	if event == "user:join" then
-		if not payload.name then
-			return
-		end
-
-		print(payload.name .. " joined!")
-		return
-	end
-
-	if event == "user:leave" then
-		if not payload.name then
-			return
-		end
 
 		print(payload.name .. " left :(")
-		return
-	end
+	end,
 
-	if event == "ping" then
-		M.send_event({
-			event = "pong",
-		})
-		return
-	end
+	["ping"] = function()
+		M.send_event({ event = "pong" })
+	end,
 
-	if event == "server:error" then
-		if not payload.message then
-			return
+	["server:error"] = function(payload)
+		if payload.message then
+			print(payload.message)
 		end
+	end,
+}
 
-		print(payload.message)
+-- Handles every event received from server
+function M.handle_event(json_str)
+	local payload_json = utils.decode_json(json_str)
+
+	if not payload_json or not payload_json.e or not payload_json.p then
 		return
 	end
 
-	print("Not implemented :( " .. event)
+	local handler = events[payload_json.e]
+
+	if handler then
+		handler(payload_json.p)
+	else
+		print("Not implemented :( " .. payload_json.e)
+	end
 end
 
 return M

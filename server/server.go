@@ -231,6 +231,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "auth:handshake":
+		// TODO: provide list of users, so clients can keep track of them
 		var p AuthHandshakePayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return err
@@ -286,17 +287,6 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		s.hub.broadcast <- Message{
 			sender:  conn,
 			payload: ev,
-		}
-
-	case "cursor:leave":
-		userPayload := marshalPayload(UserPayload{
-			ID:   clientIDStr,
-			Name: client.name,
-		})
-
-		s.hub.broadcast <- Message{
-			sender:  conn,
-			payload: userPayload,
 		}
 
 	case "server:pong":

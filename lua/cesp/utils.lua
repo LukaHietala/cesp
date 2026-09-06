@@ -12,6 +12,14 @@ function M.encode_json(ltable)
 	return ok and res or nil
 end
 
+-- Checks if buf is valid and loaded
+function M.is_valid_buf(buf)
+	return buf
+		and vim.api.nvim_buf_is_valid(buf)
+		and vim.api.nvim_buf_is_loaded(buf)
+end
+
+-- Gets path of buf that maps to server buf, "path/file.hs"
 function M.get_buf_path(bufnr)
 	local full_path = vim.api.nvim_buf_get_name(bufnr or 0)
 	if full_path == "" then
@@ -24,6 +32,7 @@ function M.get_buf_path(bufnr)
 	return path
 end
 
+-- Finds buffer name by name/path on server
 function M.find_buffer_by_name(name)
 	-- DELICIOUS iterators
 	return vim.iter(vim.api.nvim_list_bufs())
