@@ -1,7 +1,7 @@
 local uv = vim.uv or vim.loop
-local bit = require("bit")
 local cursor = require("cesp.cursor")
 local events = require("cesp.events")
+local utils = require("cesp.utils")
 
 local M = {}
 M.handle = nil
@@ -38,14 +38,7 @@ local function on_read()
 				return
 			end
 
-			-- Parse big-endian payload length using black magic
-			-- Neovim uses luaJIT 5.1 so no builtin string pack/unpack or bitwise :(
-			local l1, l2, l3, l4 = string.byte(buffer, 3, 6)
-			local payload_len = bit.bor(bit.lshift(l1, 24), bit.lshift(l2, 16), bit.lshift(l3, 8), l4)
-
-			-- Make sure it's unsigned 32-bit integer
-			payload_len = bit.tobit(payload_len) % 4294967296 -- 2^32
-
+			local payload_len = utils.parse_bigendian_uint32(buffer, 3, 6)
 			-- Make sure everything made it
 			if #buffer < 6 + payload_len then
 				break

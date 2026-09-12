@@ -117,7 +117,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 			case <-ticker.C:
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := Encode(conn, Event{Type: "server:ping"}); err != nil {
+				if err := Encode(conn, Event{Type: "ping"}); err != nil {
 					log.Printf("ping error to %s: %v\n", conn.RemoteAddr(), err)
 					conn.Close()
 					cancel()
@@ -165,10 +165,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 func marshalPayload(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		// Server should never try to send broken json
 		panic(fmt.Errorf("failed to marshal payload: %v", err))
 	}
 	return b
+}
+
+func unmarshalPayload[T any](raw json.RawMessage) (T, error) {
+	var v T
+	err := json.Unmarshal(raw, &v)
+	return v, err
 }
 
 func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
@@ -187,11 +192,10 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "doc:open":
-		var p DocPathPayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[DocPathPayload](ev.Payload)
+		if err != nil {
 			return err
 		}
-
 		b := s.session.GetBuffer(p.Path)
 		lines, _ := b.GetLines(0, -1)
 
@@ -204,11 +208,10 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "doc:update":
-		var p DocUpdatePayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[DocUpdatePayload](ev.Payload)
+		if err != nil {
 			return err
 		}
-
 		b := s.session.GetBuffer(p.Path)
 		b.SetLines(p.Range[0], p.Range[1], p.Lines)
 
@@ -218,8 +221,8 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "doc:save":
-		var p DocPathPayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[DocPathPayload](ev.Payload)
+		if err != nil {
 			return err
 		}
 
@@ -232,8 +235,8 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 
 	case "auth:handshake":
 		// TODO: provide list of users, so clients can keep track of them
-		var p AuthHandshakePayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[AuthHandshakePayload](ev.Payload)
+		if err != nil {
 			return err
 		}
 
@@ -260,8 +263,8 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "cursor:move":
-		var p CursorMovePayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[CursorMovePayload](ev.Payload)
+		if err != nil {
 			return err
 		}
 
@@ -275,8 +278,8 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 	case "cursor:range":
-		var p CursorRangePayload
-		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		p, err := unmarshalPayload[CursorRangePayload](ev.Payload)
+		if err != nil {
 			return err
 		}
 
@@ -289,7 +292,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 			payload: ev,
 		}
 
-	case "server:pong":
+	case "pong":
 		return nil
 
 	case "":

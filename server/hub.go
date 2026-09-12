@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -75,7 +74,6 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-
 		case client := <-h.unregister:
 			delete(h.clients, client)
 
@@ -83,31 +81,28 @@ func (h *Hub) Run() {
 				continue
 			}
 
-			go func() {
-				clientIDStr := strconv.FormatUint(client.id, 10)
+			leavePayload := marshalPayload(UserPayload{
+				ID:   strconv.FormatUint(client.id, 10),
+				Name: client.name,
+			})
 
-				userPayload, err := json.Marshal(UserPayload{
-					ID:   clientIDStr,
-					Name: client.name,
-				})
-				if err != nil {
-					return
-				}
-
-				leaveEvent := Event{
+			leaveMsg := Message{
+				sender: client.conn,
+				payload: Event{
 					Type:    "user:leave",
-					Payload: userPayload,
-				}
+					Payload: leavePayload,
+				},
+			}
 
+			for c := range h.clients {
 				select {
-				case h.broadcast <- Message{
-					sender:  client.conn,
-					payload: leaveEvent,
-				}:
-				case <-h.shutdown:
-					return
+				case c.send <- leaveMsg.payload:
+				default:
+					c.conn.Close()
+					delete(h.clients, c)
 				}
-			}()
+			}
+
 		case msg := <-h.broadcast:
 			for client := range h.clients {
 				if client.conn == msg.sender {
