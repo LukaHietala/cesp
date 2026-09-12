@@ -3,7 +3,7 @@ local M = {}
 function M.list_remote_files()
 	local events = require("cesp.events")
 	events.send_event({
-		e = "fs:list",
+		event = "fs:list",
 	})
 end
 

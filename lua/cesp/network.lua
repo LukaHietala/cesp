@@ -80,8 +80,8 @@ function M.start_client(ip)
 		end
 
 		events.send_event({
-			e = "auth:handshake",
-			p = {
+			event = "auth:handshake",
+			payload = {
 				name = config.name,
 			},
 		})

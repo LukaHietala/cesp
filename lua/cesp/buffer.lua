@@ -26,7 +26,14 @@ function M.apply_change(buf, payload)
 	local lines = payload.lines
 
 	M.is_applying[buf] = true
-	local ok, err = pcall(vim.api.nvim_buf_set_lines, buf, start_line, end_line, false, lines)
+	local ok, err = pcall(
+		vim.api.nvim_buf_set_lines,
+		buf,
+		start_line,
+		end_line,
+		false,
+		lines
+	)
 	M.is_applying[buf] = false
 
 	if not ok then
@@ -48,7 +55,8 @@ function M.attach_buf_listener(buf, on_change)
 				return
 			end
 
-			local lines = vim.api.nvim_buf_get_lines(buf, first, new_last, false)
+			local lines =
+				vim.api.nvim_buf_get_lines(buf, first, new_last, false)
 			on_change(path, {
 				range = { first, old_last },
 				lines = lines,

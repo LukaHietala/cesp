@@ -5,8 +5,8 @@ import (
 )
 
 type Event struct {
-	Type    string          `json:"e"`
-	Payload json.RawMessage `json:"p,omitempty"`
+	Type    string          `json:"event"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type FSListResPayload struct {

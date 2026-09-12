@@ -5,7 +5,8 @@ local M = {}
 
 function M.setup(opts)
 	local config_mod = require("cesp.config")
-	config_mod.config = vim.tbl_deep_extend("force", config_mod.config, opts or {})
+	config_mod.config =
+		vim.tbl_deep_extend("force", config_mod.config, opts or {})
 
 	vim.api.nvim_create_user_command("CespJoin", function(args)
 		local ip = args.args ~= "" and args.args or "127.0.0.1"

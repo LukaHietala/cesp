@@ -54,7 +54,7 @@ local function handle_following(name, path, target_buf, row, col)
 	if utils.is_valid_buf(target_buf) then
 		vim.api.nvim_set_current_buf(target_buf)
 	else
-		events.send_event({ e = "doc:open", p = { path = path } })
+		events.send_event({ event = "doc:open", payload = { path = path } })
 	end
 
 	vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
@@ -95,16 +95,16 @@ function M.start_cursor_tracker()
 			if vim.api.nvim_get_mode().mode:match("[vV\22]") then
 				local v_pos = vim.fn.getpos("v")
 				events.send_event({
-					e = "cursor:range",
-					p = {
+					event = "cursor:range",
+					payload = {
 						path = path,
 						range = { v_pos[2] - 1, v_pos[3] - 1, row, col },
 					},
 				})
 			else
 				events.send_event({
-					e = "cursor:move",
-					p = { path = path, pos = { row, col } },
+					event = "cursor:move",
+					payload = { path = path, pos = { row, col } },
 				})
 			end
 		end,

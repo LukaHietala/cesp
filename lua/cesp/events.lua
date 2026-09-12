@@ -35,7 +35,10 @@ local events = {
 		vim.schedule(function()
 			if payload.files and #payload.files > 0 then
 				browser.open_file_browser(payload.files, function(path)
-					M.send_event({ e = "doc:open", p = { path = path } })
+					M.send_event({
+						event = "doc:open",
+						payload = { path = path },
+					})
 				end)
 			else
 				print("No files received")
@@ -51,14 +54,17 @@ local events = {
 		browser.open_remote_file(payload.path, payload.content, function(buf)
 			buffer.attach_buf_listener(buf, function(p, c)
 				M.send_event({
-					e = "doc:update",
-					p = { path = p, range = c.range, lines = c.lines },
+					event = "doc:update",
+					payload = { path = p, range = c.range, lines = c.lines },
 				})
 			end)
 			vim.api.nvim_create_autocmd("BufWriteCmd", {
 				buffer = buf,
 				callback = function()
-					M.send_event({ e = "doc:save", p = { path = payload.path } })
+					M.send_event({
+						event = "doc:save",
+						payload = { path = payload.path },
+					})
 				end,
 			})
 		end)
@@ -107,7 +113,7 @@ local events = {
 	end,
 
 	["ping"] = function()
-		M.send_event({ e = "pong" })
+		M.send_event({ event = "pong" })
 	end,
 
 	["server:error"] = function(payload)
@@ -121,16 +127,16 @@ local events = {
 function M.handle_event(json_str)
 	local payload_json = utils.decode_json(json_str)
 
-	if not payload_json or not payload_json.e then
+	if not payload_json or not payload_json.event then
 		return
 	end
 
-	local handler = events[payload_json.e]
+	local handler = events[payload_json.event]
 
 	if handler then
-		handler(payload_json.p)
+		handler(payload_json.payload)
 	else
-		print("Not implemented :( " .. payload_json.e)
+		print("Not implemented :( " .. payload_json.event)
 	end
 end
 
