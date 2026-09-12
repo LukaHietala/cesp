@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"sync/atomic"
 )
 
@@ -48,7 +49,7 @@ func NewClient(conn net.Conn) *Client {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan Message),
+		broadcast:  make(chan Message, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		shutdown:   make(chan struct{}),
@@ -73,18 +74,34 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-
 		case client := <-h.unregister:
 			delete(h.clients, client)
-			go func() {
-				h.broadcast <- Message{
-					sender: nil,
-					payload: UserJoinedOrLeft{
-						Event: "user_left",
-						ID:    client.id,
-						Name:  client.name,
-					}}
-			}()
+
+			if client.name == "" {
+				continue
+			}
+
+			leavePayload := marshalPayload(UserPayload{
+				ID:   strconv.FormatUint(client.id, 10),
+				Name: client.name,
+			})
+
+			leaveMsg := Message{
+				sender: client.conn,
+				payload: Event{
+					Type:    "user:leave",
+					Payload: leavePayload,
+				},
+			}
+
+			for c := range h.clients {
+				select {
+				case c.send <- leaveMsg.payload:
+				default:
+					c.conn.Close()
+					delete(h.clients, c)
+				}
+			}
 
 		case msg := <-h.broadcast:
 			for client := range h.clients {
