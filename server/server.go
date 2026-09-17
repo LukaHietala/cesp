@@ -9,12 +9,13 @@ import (
 	"log"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func NewServer(addr, rootDir string, ignoredDirs map[string]bool) *Server {
+func NewServer(addr, rootDir string, ignored []string) *Server {
 	s := &Server{
 		quit: make(chan struct{}),
 	}
@@ -30,9 +31,9 @@ func NewServer(addr, rootDir string, ignoredDirs map[string]bool) *Server {
 	fsys := os.DirFS(rootDir)
 
 	session := &Session{
-		fsys:        fsys,
-		rootDir:     rootDir,
-		ignoredDirs: ignoredDirs,
+		fsys:    fsys,
+		rootDir: rootDir,
+		ignored: ignored,
 	}
 
 	s.listener = listener
@@ -46,8 +47,6 @@ func NewServer(addr, rootDir string, ignoredDirs map[string]bool) *Server {
 }
 
 func (s *Server) Stop() {
-	// Save all the buffers
-	s.session.FlushAll()
 	// Signals to all goroutines to die
 	close(s.quit)
 	// Stop accepting new connections
@@ -181,7 +180,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 
 	switch ev.Type {
 	case "fs:list":
-		files, err := getFiles(s.session.fsys, s.session.ignoredDirs)
+		files, err := getFiles(s.session.fsys, s.session.ignored)
 		if err != nil {
 			return err
 		}
@@ -196,8 +195,8 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		if err != nil {
 			return err
 		}
-		b := s.session.GetBuffer(p.Path)
-		lines, _ := b.GetLines(0, -1)
+		b := s.session.FindBufferByPath(p.Path)
+		lines, _ := b.Lines(0, -1)
 
 		client.send <- Event{
 			Type: "doc:open_res",
@@ -212,7 +211,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		if err != nil {
 			return err
 		}
-		b := s.session.GetBuffer(p.Path)
+		b := s.session.FindBufferByPath(p.Path)
 		b.SetLines(p.Range[0], p.Range[1], p.Lines)
 
 		s.hub.broadcast <- Message{
@@ -226,7 +225,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 			return err
 		}
 
-		b := s.session.GetBuffer(p.Path)
+		b := s.session.FindBufferByPath(p.Path)
 		if err := b.Save(s.session.rootDir); err != nil {
 			log.Printf("error saving %s: %v\n", p.Path, err)
 		} else {
@@ -305,7 +304,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 	return nil
 }
 
-func getFiles(fsys fs.FS, ignoredDirs map[string]bool) ([]string, error) {
+func getFiles(fsys fs.FS, ignored []string) ([]string, error) {
 	var paths []string
 
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
@@ -313,9 +312,13 @@ func getFiles(fsys fs.FS, ignoredDirs map[string]bool) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
+			if slices.Contains(ignored, d.Name()) {
 				return fs.SkipDir
 			}
+			return nil
+		}
+
+		if slices.Contains(ignored, path) {
 			return nil
 		}
 

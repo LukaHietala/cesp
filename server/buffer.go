@@ -27,8 +27,17 @@ func NewBuffer(path string) *Buffer {
 func (b *Buffer) Save(rootDir string) error {
 	b.mu.RLock()
 	// Rotanloukku
-	slashPath := filepath.ToSlash(b.path)
-	if !fs.ValidPath(slashPath) {
+	// https://go.dev/blog/osroot
+	cleaned, err := filepath.EvalSymlinks(filepath.ToSlash(b.path))
+	if err != nil {
+		b.mu.RUnlock()
+		return err
+	}
+	if !filepath.IsLocal(cleaned) {
+		b.mu.RUnlock()
+		return fmt.Errorf("unsafe path %s", b.path)
+	}
+	if !fs.ValidPath(cleaned) {
 		b.mu.RUnlock()
 		return fmt.Errorf("illegal path %s", b.path)
 	}
@@ -45,8 +54,8 @@ func (b *Buffer) Save(rootDir string) error {
 	return os.WriteFile(fullPath, []byte(content), mode)
 }
 
-// GetLines returns a slice of lines between start and end (exclusive)
-func (b *Buffer) GetLines(start, end int) ([]string, error) {
+// Lines returns a slice of lines between start and end (exclusive)
+func (b *Buffer) Lines(start, end int) ([]string, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
