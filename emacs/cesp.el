@@ -187,7 +187,13 @@ the host.
 
 JSON is an object that is parsed by `json-serialize'
 into a string."
-  (process-send-string cesp-server-process (concat (json-serialize json-object) "\n")))
+  (let ((msg (json-serialize json-object)))
+	(process-send-string cesp-server-process
+					   (concat
+						'(#x0C ;; Magic 1
+						  #x0E) ;; Magic 2
+						(reverse (cesp--to-uint32 (length msg))) ;; Length
+						msg))))
 
 (defun cesp--handle-before(beg end)
   "Handle things that happen before edits are made.
@@ -283,46 +289,60 @@ as appropriate. PROC is unused."
   ;; Store data in buffer because it doesn't always
   ;; come in one packet
   (push msg cesp--messafe-buffer)
-  (if (string-search "
-" msg)
-	  (let* ((nline "
-")
-			 (raw-data (mapconcat #'identity (reverse cesp--messafe-buffer)))
-			 (lines (split-string raw-data nline nil))
-			 (leftover (last lines)))
-		(setq lines (butlast lines))
-		(setq cesp--messafe-buffer leftover)
-		;; Handle lines
-		(dolist (string lines)
-		  ;;(message "MESSAGE: %s" raw-data)
-		  ;; Event handling
-		  (let* ((json (json-parse-string string
-										  :object-type 'alist
-										  :array-type 'list))
-				 (event (cdr (assoc 'event json))))
-			;;(message (concat "Event is: " event))
-			(pcase json
-			  ((guard (string= "ping" event))
-			   (cesp--send '((event . "pong"))))
-			  ((guard (string= "handshake_response" event))
-			   (cesp--connected json))
-			  ((and (guard (string= "response_files" event))
-					(map files))
-			   (cesp--open-file-menu files))
-			  ((and (guard (string= "response_file" event))
-					(map path content))
-			   (cesp--open-remote-file path content))
-			  ((and (guard (string= "update_content" event))
-					(map path changes))
-			   (cesp--update-content path changes))
-			  ((and (guard (string= "cursor_move" event))
-					(map from_id position path name selection))
-			   (cesp--render-cursor
-				from_id position path name
-				(cdr (assoc 'start_pos selection))))
-			  ((and (guard (string= "cursor_leave" event))
-					(map client_id))
-			   (cesp--delete-cursor client_id))))))))
+  (let* ((raw-data (mapconcat #'identity (reverse cesp--messafe-buffer)))
+		 (lines (cesp--split-magic raw-data))
+		 (leftover (last lines)))
+	(setq lines (butlast lines))
+	(setq cesp--messafe-buffer leftover)
+	;; Handle lines
+	(dolist (string lines)
+	  ;;(message "MESSAGE: %s" raw-data)
+	  ;; Event handling
+	  (let* ((json (json-parse-string string
+									  :object-type 'alist
+									  :array-type 'list))
+			 (event (cdr (assoc 'event json))))
+		;;(message (concat "Event is: " event))
+		(pcase json
+		  ((guard (string= "ping" event))
+		   (cesp--send '((event . "pong"))))
+		  ((guard (string= "handshake_response" event))
+		   (cesp--connected json))
+		  ((and (guard (string= "response_files" event))
+				(map files))
+		   (cesp--open-file-menu files))
+		  ((and (guard (string= "response_file" event))
+				(map path content))
+		   (cesp--open-remote-file path content))
+		  ((and (guard (string= "update_content" event))
+				(map path changes))
+		   (cesp--update-content path changes))
+		  ((and (guard (string= "cursor_move" event))
+				(map from_id position path name selection))
+		   (cesp--render-cursor
+			from_id position path name
+			(cdr (assoc 'start_pos selection))))
+		  ((and (guard (string= "cursor_leave" event))
+				(map client_id))
+		   (cesp--delete-cursor client_id)))))))
+
+;; DEBUG
+(mapconcat (lambda (c) (format "%X" c))
+		   (reverse (cesp--to-uint32 12)))
+
+(format "%X" 12)
+
+(defun cesp--to-uint32(number)
+  "Converts a Elisp number to a uint32."
+  `(,(ash number -24)
+	,(logand (ash number -16) #xff)
+	,(logand (ash number -8) #xff)
+	,(logand number #xff)))
+
+(defun cesp--split-magic(data)
+  "Splits raw data into magic cesp packets."
+
+  )
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
@@ -362,7 +382,7 @@ contents."
   (insert content)
   ;; Try to activate appropriate major and minor modes.
   ;; This could definitely be better
-  (if-let ((mode (cdr (assoc (buffer-name) auto-mode-alist 'string-match-p)))) 
+  (if-let ((mode (cdr (assoc (buffer-name) auto-mode-alist 'string-match-p))))
 	  (funcall mode))
   ;; Initiate cesp-mode
   (cesp-mode 1)
@@ -410,7 +430,7 @@ and position is highlighted."
 	(delete-overlay o)
 	(delete-overlay o))
   (setq cesp-cursors (map-delete cesp-cursors 1)))
-   
+
 (defun cesp--clear-cursors()
   "Deletes other peoples cursors.
 Mainly for debugging but also used when
