@@ -3,24 +3,12 @@ package main
 import (
 	"context"
 	"flag"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 )
-
-type Server struct {
-	listener net.Listener
-	quit     chan struct{}
-	wg       sync.WaitGroup
-	// Holds all TCP connections
-	hub *Hub
-	// Holds buffers, and other non-tcp stuff
-	session *Session
-}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -29,7 +17,8 @@ func main() {
 	port, rootDir, ignoredDirs := parseArgs()
 
 	addr := ":" + port
-	s := NewServer(addr, rootDir, ignoredDirs)
+	s := NewServer(rootDir, ignoredDirs)
+	s.Start(addr)
 
 	<-ctx.Done()
 	s.Stop()

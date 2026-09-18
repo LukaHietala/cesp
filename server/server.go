@@ -12,45 +12,50 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-func NewServer(addr, rootDir string, ignored []string) *Server {
-	s := &Server{
-		quit: make(chan struct{}),
-	}
+type Server struct {
+	ln   net.Listener
+	quit chan struct{}
+	wg   sync.WaitGroup
+	// Holds all TCP connections
+	hub *Hub
+	// Holds buffers, and other non-tcp stuff
+	session *Session
+}
 
-	listener, err := net.Listen("tcp", addr)
+func NewServer(rootDir string, ignored []string) *Server {
+	return &Server{
+		quit: make(chan struct{}),
+		hub:  NewHub(),
+		session: &Session{
+			fsys:    os.DirFS(rootDir),
+			rootDir: rootDir,
+			ignored: ignored,
+		},
+	}
+}
+
+func (s *Server) Start(addr string) {
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	hub := NewHub()
-	go hub.Run()
+	go s.hub.Run()
 
-	fsys := os.DirFS(rootDir)
-
-	session := &Session{
-		fsys:    fsys,
-		rootDir: rootDir,
-		ignored: ignored,
-	}
-
-	s.listener = listener
-	s.hub = hub
-	s.session = session
+	s.ln = ln
 
 	s.wg.Add(1)
 	go s.serve()
-
-	return s
 }
 
 func (s *Server) Stop() {
-	// Signals to all goroutines to die
 	close(s.quit)
 	// Stop accepting new connections
-	s.listener.Close()
+	s.ln.Close()
 	// Closes all existing connections
 	s.hub.Stop()
 	// Wait for everything to cleanup
@@ -59,10 +64,10 @@ func (s *Server) Stop() {
 
 func (s *Server) serve() {
 	defer s.wg.Done()
-	log.Println("listening on", s.listener.Addr().String())
+	log.Println("listening on", s.ln.Addr().String())
 
 	for {
-		conn, err := s.listener.Accept()
+		conn, err := s.ln.Accept()
 		if err != nil {
 			select {
 			case <-s.quit:
