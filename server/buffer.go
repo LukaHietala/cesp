@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -26,27 +25,31 @@ func NewBuffer(path string) *Buffer {
 // Save saves a buffer
 func (b *Buffer) Save(rootDir string) error {
 	b.mu.RLock()
-	// Rotanloukku
-	slashPath := filepath.ToSlash(b.path)
-	if !fs.ValidPath(slashPath) {
-		b.mu.RUnlock()
-		return fmt.Errorf("illegal path %s", b.path)
-	}
+	relPath := b.path
 	content := strings.Join(b.lines, "\n")
 	b.mu.RUnlock()
 
-	fullPath := filepath.Join(rootDir, b.path)
+	// Rotanloukku
+	if !fs.ValidPath(relPath) {
+		return fmt.Errorf("illegal path: %q", relPath)
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to open root dir: %w", err)
+	}
+	defer root.Close()
 
 	mode := os.FileMode(0644)
-	if info, err := os.Stat(fullPath); err == nil {
+	if info, err := root.Stat(relPath); err == nil {
 		mode = info.Mode()
 	}
 
-	return os.WriteFile(fullPath, []byte(content), mode)
+	return root.WriteFile(relPath, []byte(content), mode)
 }
 
-// GetLines returns a slice of lines between start and end (exclusive)
-func (b *Buffer) GetLines(start, end int) ([]string, error) {
+// Lines returns a slice of lines between start and end (exclusive)
+func (b *Buffer) Lines(start, end int) ([]string, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

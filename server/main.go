@@ -36,14 +36,13 @@ func main() {
 	os.Exit(0)
 }
 
-// TODO: files too
-var defaultIgnoredDirs = []string{
-	".git", "node_modules", "build", ".venv", ".vscode", "venv", "__pycache__",
+var defaultIgnored = []string{
+	".git", ".env", "node_modules", "build", ".venv", ".vscode", "venv", "__pycache__",
 }
 
-func parseArgs() (port string, rootDir string, ignoredDirs map[string]bool) {
+func parseArgs() (port string, rootDir string, ignored []string) {
 	portPtr := flag.String("port", "8080", "Port to run the server on")
-	ignorePtr := flag.String("ignore", "", "Comma separated extra dirs to ignore")
+	ignorePtr := flag.String("ignore", "", "Comma separated dirs or files to ignore")
 	flag.Parse()
 
 	if rootDir == "" {
@@ -54,18 +53,15 @@ func parseArgs() (port string, rootDir string, ignoredDirs map[string]bool) {
 		rootDir = filepath.Clean(flag.Arg(0))
 	}
 
-	ignoredDirs = make(map[string]bool, len(defaultIgnoredDirs))
-	for _, v := range defaultIgnoredDirs {
-		ignoredDirs[v] = true
-	}
+	ignored = defaultIgnored
 
 	if *ignorePtr != "" {
 		for v := range strings.SplitSeq(*ignorePtr, ",") {
 			if trimmed := strings.TrimSpace(v); trimmed != "" {
-				ignoredDirs[trimmed] = true
+				ignored = append(ignored, trimmed)
 			}
 		}
 	}
 
-	return *portPtr, rootDir, ignoredDirs
+	return *portPtr, rootDir, ignored
 }

@@ -16,13 +16,12 @@ type Client struct {
 	id   uint64
 	name string
 	conn net.Conn
-	// Queue for outgoing messages (buffered)
-	send chan any
+	send chan Event
 }
 
 type Message struct {
 	sender  net.Conn
-	payload any
+	payload Event
 }
 
 type Hub struct {
@@ -42,7 +41,7 @@ func NewClient(conn net.Conn) *Client {
 	return &Client{
 		id:   nextID.Add(1),
 		conn: conn,
-		send: make(chan any, 100),
+		send: make(chan Event, 100),
 	}
 }
 
@@ -54,6 +53,10 @@ func NewHub() *Hub {
 		unregister: make(chan *Client),
 		shutdown:   make(chan struct{}),
 	}
+}
+
+func (c *Client) Name() string {
+	return c.name
 }
 
 func (c *Client) SetName(name string) error {
@@ -119,7 +122,6 @@ func (h *Hub) Run() {
 			}
 
 		case <-h.shutdown:
-			// Closes all connections, pumps will break cleanly
 			for client := range h.clients {
 				client.conn.Close()
 			}

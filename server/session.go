@@ -8,14 +8,14 @@ import (
 )
 
 type Session struct {
-	buffers     sync.Map
-	fsys        fs.FS
-	rootDir     string
-	ignoredDirs map[string]bool
+	buffers sync.Map
+	fsys    fs.FS
+	rootDir string
+	ignored []string
 }
 
-// GetBuffer returns an existing buffer for the path, or creates a new one
-func (s *Session) GetBuffer(path string) *Buffer {
+// FindBufferByPath returns an existing buffer for the path, or creates a new one
+func (s *Session) FindBufferByPath(path string) *Buffer {
 	if v, ok := s.buffers.Load(path); ok {
 		return v.(*Buffer)
 	}
@@ -37,6 +37,7 @@ func (s *Session) GetBuffer(path string) *Buffer {
 }
 
 // Saves all buffers
+// TODO: option?
 func (s *Session) FlushAll() {
 	s.buffers.Range(func(k, v any) bool {
 		b := v.(*Buffer)
