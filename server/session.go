@@ -2,7 +2,6 @@ package main
 
 import (
 	"io/fs"
-	"log"
 	"strings"
 	"sync"
 )
@@ -27,24 +26,12 @@ func (s *Session) FindBufferByPath(path string) *Buffer {
 		return actual.(*Buffer)
 	}
 
-	content, err := fs.ReadFile(s.fsys, path)
+	raw, err := fs.ReadFile(s.fsys, path)
 	if err == nil {
-		lines := strings.Split(string(content), "\n")
+		content := strings.ReplaceAll(string(raw), "\r\n", "\n")
+		lines := strings.Split(content, "\n")
 		b.SetLines(0, len(b.lines), lines)
 	}
 
 	return b
-}
-
-// Saves all buffers
-// TODO: option?
-func (s *Session) FlushAll() {
-	s.buffers.Range(func(k, v any) bool {
-		b := v.(*Buffer)
-		err := b.Save(s.rootDir)
-		if err != nil {
-			log.Println(err)
-		}
-		return true
-	})
 }
