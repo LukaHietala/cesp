@@ -268,7 +268,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 		p.ID = clientIDStr
-		p.Name = client.name
+		p.Name = client.Name()
 		ev.Payload = marshalPayload(p)
 
 		s.hub.broadcast <- Message{
@@ -283,7 +283,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 		p.ID = clientIDStr
-		p.Name = client.name
+		p.Name = client.Name()
 		ev.Payload = marshalPayload(p)
 
 		s.hub.broadcast <- Message{
