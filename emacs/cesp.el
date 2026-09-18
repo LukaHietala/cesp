@@ -104,7 +104,7 @@ name as per the variable"
 								   :filter #'cesp--filter
 								   :sentinel #'cesp--sentinel))
 		;; Perform handshake
-		(cesp--send `((event . "handshake") (name . ,cesp-name) )))
+		(cesp--send "auth:handshake" `((name . ,cesp-name))))
 	(error "You are already connected to a server!")))
 
 ;;;###autoload
@@ -179,20 +179,20 @@ This function may be used directly, or by cesp-browse-mode"
 
 ;;; Internal functions
 
-(defun cesp--send(json-object)
+(defun cesp--send(event payload)
   "Sends the server a message formatted in Json.
-This sends JSON-OBJECT to the Cesp server, which will then
-forward the message accordingly to other clients or
-the host.
+This sends EVENT and PAYLOAD to the Cesp server, which
+will then forward the message accordingly to other clients
+or the host.
 
-JSON is an object that is parsed by `json-serialize'
+PAYLOAD is an object that is parsed by `json-serialize'
 into a string."
-  (let ((msg (json-serialize json-object)))
+  (let ((msg (json-serialize `((event . ,event) (payload . ,payload)))))
 	(process-send-string cesp-server-process
 					   (concat
 						'(#x0C ;; Magic 1
 						  #x0E) ;; Magic 2
-						(reverse (cesp--to-uint32 (length msg))) ;; Length
+						(cesp--to-uint32 (length msg)) ;; Length
 						msg))))
 
 (defun cesp--handle-before(beg end)
@@ -296,7 +296,6 @@ as appropriate. PROC is unused."
 	(setq cesp--messafe-buffer leftover)
 	;; Handle lines
 	(dolist (string lines)
-	  ;;(message "MESSAGE: %s" raw-data)
 	  ;; Event handling
 	  (let* ((json (json-parse-string string
 									  :object-type 'alist
@@ -328,21 +327,70 @@ as appropriate. PROC is unused."
 
 ;; DEBUG
 (mapconcat (lambda (c) (format "%X" c))
-		   (reverse (cesp--to-uint32 12)))
+		   (cesp--to-uint32 #x12))
 
-(format "%X" 12)
+(format "%X" #x1234)
 
 (defun cesp--to-uint32(number)
-  "Converts a Elisp number to a uint32."
+  "Converts an Elisp number to an uint32."
   `(,(ash number -24)
 	,(logand (ash number -16) #xff)
 	,(logand (ash number -8) #xff)
 	,(logand number #xff)))
 
-(defun cesp--split-magic(data)
-  "Splits raw data into magic cesp packets."
+(defun cesp--from-uint32(uint32)
+  "Converts an uint32 into an Elisp number."
+  (pcase-let (( `(,l1,l2,l3,l4) uint32 ))
+	(+ (ash l1 24)
+	   (ash l2 16)
+	   (ash l3 8)
+	   l4)))
 
-  )
+(cesp--split-magic
+ (concat
+  '(#x0C ;; Magic 1
+	#x0E) ;; Magic 2
+  (cesp--to-uint32 6) ;; Length
+  "moikka"
+
+  '(#x0C ;; Magic 1
+	#x0E) ;; Magic 2
+  (cesp--to-uint32 4) ;; Length
+  "kisu"
+
+  '(#x0C ;; Magic 1
+	#x0E) ;; Magic 2
+  (cesp--to-uint32 10) ;; Length
+  "inter"
+  ))
+
+(defun cesp--split-magic(data)
+  "Splits DATA into Cesp packets via magic.
+If unfinished packet, it's returned at the end.
+If there is not an unfinished packet, return an extra
+empty string. "
+  ;; Get header
+  (let ((packets nil)
+		(interrupted nil))
+	(while (not (string= data ""))
+	  (condition-case err
+		  (progn
+			(let* ((header-size 6)
+				   (header  (substring data 0 header-size))
+				   (magic (substring header 0 2))
+				   (payload-size (cesp--from-uint32 (append (substring header 2 6) nil)))
+				   (payload (substring data header-size (+ header-size payload-size))))
+			  ;; Leftovers
+			  (setq data (substring data (+ header-size payload-size)))
+			  (add-to-list 'packets payload t)))
+		(args-out-of-range
+		 (add-to-list 'packets data t)
+		 (print data)
+		 (setq interrupted t)
+		 (setq data ""))))
+	(unless interrupted
+	  (add-to-list 'packets data t))
+	packets))
 
 (defun cesp--sentinel(proc msg)
   "Sentinel function which will handle status change in connection.
@@ -452,7 +500,7 @@ CHANGES is an alist with the changes specified as such:
   (let ((buffer (get-buffer path)))
 	(if buffer
 		(save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
-		  (set-buffer buffer)
+		  (Set-buffer buffer)
 		  (save-restriction
 			(widen)
 			(pcase-let* (((map first ('old_last old-last) lines) changes))

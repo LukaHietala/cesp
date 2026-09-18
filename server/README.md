@@ -2,12 +2,12 @@
 
 ### Headers
 
-| Field | Offset (Bytes) | Size | Value / Type | Description |
-|---|---|---|---|---|
-| Magic 1 | `0` | 1 byte | `0x0C` | First magic byte |
-| Magic 2 | `1` | 1 byte | `0x0E` |Second magic byte |
-| Length | `2 - 5` | 4 bytes | `uint32` (Big-Endian) | Payload size |
-| Payload | `6+` | 0-10MB | JSON (Max 10 MB) | Data |
+| Field   | Offset (Bytes) | Size    | Value / Type          | Description       |
+|---------+----------------+---------+-----------------------+-------------------|
+| Magic 1 | `0`            | 1 byte  | `0x0C`                | First magic byte  |
+| Magic 2 | `1`            | 1 byte  | `0x0E`                | Second magic byte |
+| Length  | `2 - 5`        | 4 bytes | `uint32` (Big-Endian) | Payload size      |
+| Payload | `6+`           | 0-10MB  | JSON (Max 10 MB)      | Data              |
 
 <details>
 <summary>Usage example</summary>
