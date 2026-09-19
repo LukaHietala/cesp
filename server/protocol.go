@@ -86,12 +86,13 @@ func Decode(r io.Reader, v any) error {
 
 	lr := io.LimitReader(r, int64(payloadLen))
 
+	defer func() {
+		_, _ = io.Copy(io.Discard, lr)
+	}()
+
 	if err := json.UnmarshalRead(lr, v); err != nil {
 		return err
 	}
-
-	// Drain unconsumed bytes
-	_, _ = io.Copy(io.Discard, lr)
 
 	return nil
 }

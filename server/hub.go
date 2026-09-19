@@ -20,7 +20,7 @@ type Client struct {
 }
 
 type Message struct {
-	sender  net.Conn
+	sender  *Client
 	payload Event
 }
 
@@ -34,7 +34,7 @@ type Hub struct {
 	// Unregister a new client
 	unregister chan *Client
 	// Signals hub to tear down
-	shutdown chan struct{}
+	quit chan struct{}
 }
 
 func NewClient(conn net.Conn) *Client {
@@ -51,7 +51,7 @@ func NewHub() *Hub {
 		broadcast:  make(chan Message, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		shutdown:   make(chan struct{}),
+		quit:       make(chan struct{}),
 	}
 }
 
@@ -68,8 +68,8 @@ func (c *Client) SetName(name string) error {
 }
 
 // Cleanup all clients
-func (h *Hub) Stop() {
-	close(h.shutdown)
+func (h *Hub) Close() {
+	close(h.quit)
 }
 
 func (h *Hub) Run() {
@@ -78,54 +78,50 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.clients[client] = true
 		case client := <-h.unregister:
-			delete(h.clients, client)
+			if _, ok := h.clients[client]; ok {
+				h.removeClient(client)
 
-			if client.name == "" {
-				continue
-			}
-
-			leavePayload := marshalPayload(UserPayload{
-				ID:   strconv.FormatUint(client.id, 10),
-				Name: client.name,
-			})
-
-			leaveMsg := Message{
-				sender: client.conn,
-				payload: Event{
-					Type:    "user:leave",
-					Payload: leavePayload,
-				},
-			}
-
-			for c := range h.clients {
-				select {
-				case c.send <- leaveMsg.payload:
-				default:
-					c.conn.Close()
-					delete(h.clients, c)
-				}
-			}
-
-		case msg := <-h.broadcast:
-			for client := range h.clients {
-				if client.conn == msg.sender {
+				if client.name != "" {
 					continue
 				}
 
-				select {
-				case client.send <- msg.payload:
-				default:
-					// Send buffer full, drop the client
-					client.conn.Close()
-					delete(h.clients, client)
-				}
+				h.broadcastEvent(client, Event{
+					Type: "user:leave",
+					Payload: marshalPayload(UserPayload{
+						ID:   strconv.FormatUint(client.id, 10),
+						Name: client.name,
+					}),
+				})
 			}
 
-		case <-h.shutdown:
+		case msg := <-h.broadcast:
+			h.broadcastEvent(msg.sender, msg.payload)
+
+		case <-h.quit:
 			for client := range h.clients {
-				client.conn.Close()
+				h.removeClient(client)
 			}
 			return
 		}
 	}
+}
+
+func (h *Hub) broadcastEvent(sender *Client, payload Event) {
+	for client := range h.clients {
+		if client == sender {
+			continue
+		}
+
+		select {
+		case client.send <- payload:
+		default:
+			h.removeClient(client)
+		}
+	}
+}
+
+func (h *Hub) removeClient(c *Client) {
+	c.conn.Close()
+	close(c.send)
+	delete(h.clients, c)
 }

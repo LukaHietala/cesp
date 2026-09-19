@@ -9,7 +9,7 @@ import (
 type Session struct {
 	buffers sync.Map
 	fsys    fs.FS
-	rootDir string
+	root    string
 	ignored []string
 }
 

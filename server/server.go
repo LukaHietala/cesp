@@ -26,13 +26,13 @@ type Server struct {
 	session *Session
 }
 
-func NewServer(rootDir string, ignored []string) *Server {
+func NewServer(root string, ignored []string) *Server {
 	return &Server{
 		quit: make(chan struct{}),
 		hub:  NewHub(),
 		session: &Session{
-			fsys:    os.DirFS(rootDir),
-			rootDir: rootDir,
+			fsys:    os.DirFS(root),
+			root:    root,
 			ignored: ignored,
 		},
 	}
@@ -54,11 +54,8 @@ func (s *Server) Start(addr string) {
 
 func (s *Server) Stop() {
 	close(s.quit)
-	// Stop accepting new connections
 	s.ln.Close()
-	// Closes all existing connections
-	s.hub.Stop()
-	// Wait for everything to cleanup
+	s.hub.Close()
 	s.wg.Wait()
 }
 
@@ -148,7 +145,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		log.Println("received event:", ev.Type)
 
-		err = s.handleEvent(ev, client, conn)
+		err = s.handleEvent(ev, client)
 		if err != nil {
 			log.Printf("event error %s: %v\n", ev.Type, err)
 
@@ -180,7 +177,7 @@ func unmarshalPayload[T any](raw json.RawMessage) (T, error) {
 	return v, err
 }
 
-func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
+func (s *Server) handleEvent(ev Event, client *Client) error {
 	clientIDStr := strconv.FormatUint(client.id, 10)
 
 	switch ev.Type {
@@ -220,7 +217,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		b.SetLines(p.Range[0], p.Range[1], p.Lines)
 
 		s.hub.broadcast <- Message{
-			sender:  conn,
+			sender:  client,
 			payload: ev,
 		}
 
@@ -231,7 +228,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 		b := s.session.FindBufferByPath(p.Path)
-		if err := b.Save(s.session.rootDir); err != nil {
+		if err := b.Save(s.session.root); err != nil {
 			log.Printf("error saving %s: %v\n", p.Path, err)
 		} else {
 			log.Printf("saved %s\n", p.Path)
@@ -259,7 +256,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		}
 
 		s.hub.broadcast <- Message{
-			sender: conn,
+			sender: client,
 			payload: Event{
 				Type:    "user:join",
 				Payload: userPayload,
@@ -277,7 +274,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		ev.Payload = marshalPayload(p)
 
 		s.hub.broadcast <- Message{
-			sender:  conn,
+			sender:  client,
 			payload: ev,
 		}
 
@@ -292,7 +289,7 @@ func (s *Server) handleEvent(ev Event, client *Client, conn net.Conn) error {
 		ev.Payload = marshalPayload(p)
 
 		s.hub.broadcast <- Message{
-			sender:  conn,
+			sender:  client,
 			payload: ev,
 		}
 
