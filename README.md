@@ -10,11 +10,11 @@ in the air.
 Not all editors will work 100% the same, but Cesp should guarantee reasonable
 stability.
 
-| Editor | Status |
-| ------ | ------- |
-| Neovim | Works |
-| Emacs  | Works |
-| Vscode | Someday |
+| Editor | Status           |
+| ------ | ---------------- |
+| Neovim | Works            |
+| Emacs  | Works            |
+| Vscode | Someday          |
 | Vim    | Possibly someday |
 
 ## Installation
@@ -27,7 +27,7 @@ will have to add this repository as a submodule in your `.emacs.d`.
 Assuming you have the repository cloned into `~/.emacs.d/cesp`, you will simply
 need to add this to your `init.el` to make Cesp work.
 
-```lisp
+```elisp
 (add-to-list 'load-path "~/.emacs.d/cesp/emacs")
 (require 'cesp)
 ```
@@ -78,9 +78,8 @@ You can use the following commands:
 - `cesp-connect-server`: Join a server, either as a host or client.
 - `cesp-disconnect`: Disconnect from a Cesp server.
 - `list-cesp-files`: List all of the host's files and choose one to open.
-- `cesp-get-file`: Directly input the name of a host's file to open.
 - `cesp-reload-buffer`: Re-open the current file.
-- `cesp-connected-p`: Whether or not your are currently connected to a Cesp
+- `cesp-connected-p`: Whether or not you are currently connected to a Cesp
   server.
 
 ### Neovim

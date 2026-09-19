@@ -343,7 +343,7 @@ as appropriate. PROC is unused."
 		   (cesp--delete-cursor id)))))))
 
 (defun cesp--to-uint32(number)
-  "Converts an Elisp number to an uint32."
+  "Converts an Elisp number into an uint32."
   `(,(ash number -24)
 	,(logand (ash number -16) #xff)
 	,(logand (ash number -8) #xff)
