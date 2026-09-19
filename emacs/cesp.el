@@ -27,7 +27,7 @@
 
 ;;; Public variables
 
-(defgroup cespconf nil
+(defgroup cesp nil
   "Variables related to configuring Cesp."
   :group 'communication)
 
@@ -39,10 +39,6 @@ you are editing with them"
   :type 'string)
 
 ;;; Internal variables
-
-(defvar cesp-is-host
-  nil
-  "Am I the host?")
 
 (defvar cesp-server-process
   nil
@@ -130,17 +126,7 @@ This will send a request_files event to the host.
 This function does not handle the response"
   (interactive)
   (if (cesp-connected-p)
-	  (cesp--send '((event . "request_files")))
-	(error "You are not connected to a server!")))
-
-;;;###autoload
-(defun cesp-get-file(file)
-  "Sends a request to get FILE from the host's computer.
-
-This function may be used directly, or by cesp-browse-mode"
-  (interactive "sFile path: ")
-  (if (cesp-connected-p)
-	  (cesp--send `((event . "request_file") (path . ,file)))
+	  (cesp--send "fs:list" nil)
 	(error "You are not connected to a server!")))
 
 ;;;###autoload
@@ -210,8 +196,10 @@ This sends content between BEG and END to the server, LEN is unused."
 ")
 			 ;; Lines after update
 			 (lines (split-string (cesp--get-lines first new-last) nline nil)))
-		(cesp--send `((event . "update_content") (path . ,(buffer-name))
-		 			  (changes . ((first . ,first) (old_last . ,cesp--old-last) (lines . ,(vconcat lines)))) )))))
+		(cesp--send "doc:update"
+					`((path . ,(buffer-name))
+		 			  (range . ,(vconcat `(,first ,cesp--old-last)))
+					  (lines . ,(vconcat lines)))))))
 
 (defun cesp--get-lines(start last)
   "Get lines from START to LAST.
@@ -236,10 +224,14 @@ START is inclusive, LAST is exclusive."
   "Send the current mouse position to the server."
   (unless (equal (point) cesp--last-position)
 	(if (region-active-p)
-		(cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point))))
-					  (selection . ((start_pos . ,(vconcat (cesp--col-and-row (mark)))))) (path . ,(buffer-name))))
+		(cesp--send "cursor:range"
+					`((range . ,(vconcat (cesp--col-and-row (point))
+											(cesp--col-and-row (mark))))
+					  (path . ,(buffer-name))))
 	  ;; If not highlighting
-	  (cesp--send `((event . "cursor_move") (position . ,(vconcat (cesp--col-and-row (point)))) (path . ,(buffer-name))))))
+	  (cesp--send "cursor:move"
+				  `((pos . ,(vconcat (cesp--col-and-row (point))))
+					(path . ,(buffer-name))))))
   (setq cesp--last-position (point)))
 
 (defun cesp--col-and-row(point)
@@ -274,10 +266,14 @@ COL is 0-indexed."
 ARG is unused."
   (if cesp-mode
 	  (progn
-		(message "(Sent remote_write event)")
-		(cesp--send `((event . "remote_write") (path . ,(buffer-name))))
+		(message "(Sent doc:write event)")
+		(cesp--send "doc:write" `((path . ,(buffer-name))))
 		t)
 	nil))
+
+(defun cesp-get-file(file)
+  "Sends a request to get FILE from the host's computer."
+  (cesp--send "doc:open"  `((path . ,file))))
 
 ;;;; Handlers
 
@@ -296,40 +292,55 @@ as appropriate. PROC is unused."
 	(setq cesp--messafe-buffer leftover)
 	;; Handle lines
 	(dolist (string lines)
+	  ;;(message "Message: %s" string)
 	  ;; Event handling
 	  (let* ((json (json-parse-string string
 									  :object-type 'alist
 									  :array-type 'list))
-			 (event (cdr (assoc 'event json))))
-		;;(message (concat "Event is: " event))
-		(pcase json
+			 (event (cdr (assoc 'event json)))
+			 (payload (cdr (assoc 'payload json))))
+		(pcase payload
+		  ;; Ping
 		  ((guard (string= "ping" event))
-		   (cesp--send '((event . "pong"))))
-		  ((guard (string= "handshake_response" event))
-		   (cesp--connected json))
-		  ((and (guard (string= "response_files" event))
+		   (cesp--send "pong" nil))
+		  ;; Server
+		  ((and (guard (string= "server:error" event))
+				(map message))
+		   (message "Cesp server: %s" message))
+		  ;; Authentication
+		  ((guard (string= "auth:handshake_res" event))
+		   (message "Connected to Cesp!"))
+		  ;; File system
+		  ((and (guard (string= "fs:list_res" event))
 				(map files))
 		   (cesp--open-file-menu files))
-		  ((and (guard (string= "response_file" event))
+		  ;; Document
+		  ((and (guard (string= "doc:open_res" event))
 				(map path content))
 		   (cesp--open-remote-file path content))
-		  ((and (guard (string= "update_content" event))
-				(map path changes))
-		   (cesp--update-content path changes))
-		  ((and (guard (string= "cursor_move" event))
-				(map from_id position path name selection))
+		  ((and (guard (string= "doc:update" event))
+				(map path range lines))
+		   (cesp--update-content path range lines))
+		  ;; Cursor
+		  ((and (guard (string= "cursor:move" event))
+				(map id pos path name))
 		   (cesp--render-cursor
-			from_id position path name
-			(cdr (assoc 'start_pos selection))))
-		  ((and (guard (string= "cursor_leave" event))
-				(map client_id))
-		   (cesp--delete-cursor client_id)))))))
-
-;; DEBUG
-(mapconcat (lambda (c) (format "%X" c))
-		   (cesp--to-uint32 #x12))
-
-(format "%X" #x1234)
+			id pos path name))
+		  ((and (guard (string= "cursor:range" event))
+				(map id range path name))
+		   (let* ((posses (seq-split range 2))
+				 (pos1 (car posses))
+				 (pos2 (car (cdr posses))))
+			 (cesp--render-cursor
+			  id pos1 path name pos2)))
+		  ;; Users
+		  ((and (guard (string= "user:join" event))
+				(map name))
+		   (message "%s joined" name))
+		  ((and (guard (string= "user:leave" event))
+				(map id name))
+		   (message "%s left" name)
+		   (cesp--delete-cursor id)))))))
 
 (defun cesp--to-uint32(number)
   "Converts an Elisp number to an uint32."
@@ -346,24 +357,6 @@ as appropriate. PROC is unused."
 	   (ash l3 8)
 	   l4)))
 
-(cesp--split-magic
- (concat
-  '(#x0C ;; Magic 1
-	#x0E) ;; Magic 2
-  (cesp--to-uint32 6) ;; Length
-  "moikka"
-
-  '(#x0C ;; Magic 1
-	#x0E) ;; Magic 2
-  (cesp--to-uint32 4) ;; Length
-  "kisu"
-
-  '(#x0C ;; Magic 1
-	#x0E) ;; Magic 2
-  (cesp--to-uint32 10) ;; Length
-  "inter"
-  ))
-
 (defun cesp--split-magic(data)
   "Splits DATA into Cesp packets via magic.
 If unfinished packet, it's returned at the end.
@@ -376,7 +369,7 @@ empty string. "
 	  (condition-case err
 		  (progn
 			(let* ((header-size 6)
-				   (header  (substring data 0 header-size))
+				   (header (encode-coding-string (substring data 0 header-size) 'utf-8))
 				   (magic (substring header 0 2))
 				   (payload-size (cesp--from-uint32 (append (substring header 2 6) nil)))
 				   (payload (substring data header-size (+ header-size payload-size))))
@@ -385,7 +378,6 @@ empty string. "
 			  (add-to-list 'packets payload t)))
 		(args-out-of-range
 		 (add-to-list 'packets data t)
-		 (print data)
 		 (setq interrupted t)
 		 (setq data ""))))
 	(unless interrupted
@@ -398,14 +390,6 @@ PROC and MSG are used somehow, idk."
   (if (string= msg "connection broken by remote peer\n")
       (message (format "client %s has quit" proc))
 	(message (concat "SENTINEL MESSAGE: "  msg))))
-
-(defun cesp--connected(json)
-  "Function called when handshake_response is received.
-JSON is the json message directly received from the server"
-  (message "Connected to Cesp!")
-  (or (and (cdr (assoc 'is_host json))
-		   (setq cesp-is-host t))
-	  (setq cesp-is-host nil)))
 
 (defun cesp--open-file-menu(files)
   "Handler function which opens a menu to pick FILES."
@@ -488,29 +472,28 @@ disconnected."
 	  (delete-overlay (car (cdr (cdr o)))))
 	(setq cesp-cursors nil))
 
-(defun cesp--update-content(path changes)
+(defun cesp--update-content(path range lines)
   "Handler function which will apply change to buffer PATH.
 If the specified buffer is not currently open, then
 the changes are not applied.
 
-CHANGES is an alist with the changes specified as such:
-- first: First line (with 0 as the first line)
-- old_last: Last line I guess?
-- lines: List of the lines as they are now"
+RANGE is a list with two lines which map the bind the edit range.
+LINES: List of the lines in the range as they are now"
   (let ((buffer (get-buffer path)))
 	(if buffer
 		(save-excursion ;; THIS ENTIRE BLOCK IS SUBJECT TO OPTIMIZATION
-		  (Set-buffer buffer)
+		  (set-buffer buffer)
 		  (save-restriction
 			(widen)
-			(pcase-let* (((map first ('old_last old-last) lines) changes))
+			(let ((first (car range))
+				  (last (car (cdr range))))
 			  ;; Goto first line
 			  (goto-char (point-min))
 			  (forward-line first)
 			  ;; Replace lines iteratively
 			  ;; (also make sure this doesn't trigger the cesp after-change hook)
 			  (setq inhibit-modification-hooks t)
-			  (dotimes (_ (- old-last first))
+			  (dotimes (_ (- last first))
 				(delete-line))
 			  (dolist (line lines)
 				(insert (concat line "\n")))
