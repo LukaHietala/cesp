@@ -296,7 +296,7 @@ as appropriate. PROC is unused."
 	(dolist (string lines)
 	  ;;(message "Message: %s" string)
 	  ;; Event handling
-	  (let* ((json (json-parse-string string
+	  (let* ((json (json-parse-string (decode-coding-string string 'utf-8)
 									  :object-type 'alist
 									  :array-type 'list))
 			 (event (cdr (assoc 'event json)))
