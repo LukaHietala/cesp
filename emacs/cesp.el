@@ -98,7 +98,8 @@ name as per the variable"
 								   :service port
 								   :family #'ipv4 ;; TODO: Support for ipv6
 								   :filter #'cesp--filter
-								   :sentinel #'cesp--sentinel))
+								   :sentinel #'cesp--sentinel
+								   :coding 'no-conversion))
 		;; Perform handshake
 		(cesp--send "auth:handshake" `((name . ,cesp-name))))
 	(error "You are already connected to a server!")))
@@ -175,11 +176,12 @@ PAYLOAD is an object that is parsed by `json-serialize'
 into a string."
   (let ((msg (json-serialize `((event . ,event) (payload . ,payload)))))
 	(process-send-string cesp-server-process
-					   (concat
-						'(#x0C ;; Magic 1
-						  #x0E) ;; Magic 2
-						(cesp--to-uint32 (length msg)) ;; Length
-						msg))))
+						 (string-make-unibyte
+						  (concat
+						   '(#x0C ;; Magic 1
+							 #x0E) ;; Magic 2
+						   (cesp--to-uint32 (length msg))))) ;; Length
+	(process-send-string cesp-server-process msg)))
 
 (defun cesp--handle-before(beg end)
   "Handle things that happen before edits are made.
