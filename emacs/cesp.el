@@ -269,7 +269,7 @@ ARG is unused."
   (if cesp-mode
 	  (progn
 		(message "(Sent doc:write event)")
-		(cesp--send "doc:write" `((path . ,(buffer-name))))
+		(cesp--send "doc:save" `((path . ,(buffer-name))))
 		t)
 	nil))
 
