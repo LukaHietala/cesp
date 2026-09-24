@@ -69,13 +69,16 @@ To use Cesp, the host machine should first start up the server via:
 go run . -port=8080 -ignore=.vscode,node_modules /path/to/project
 ```
 
-Following this, usage of Cesp in-editor is generally speaking always the same.
+Following this, usage of Cesp in-editor is generally speaking always the same. 
+You simply join a server, and then open remote files using the function provided by
+your plugin/package. You can also remotely save files by simply saving as normal
+while in a Cesp buffer.
 
 ### Emacs
 
 You can use the following commands:
 
-- `cesp-connect-server`: Join a server, either as a host or client.
+- `cesp-connect-server`: Join a server.
 - `cesp-disconnect`: Disconnect from a Cesp server.
 - `list-cesp-files`: List all of the host's files and choose one to open.
 - `cesp-reload-buffer`: Re-open the current file.
@@ -89,5 +92,4 @@ You can use the following commands:
 - `:CespJoin`: Join a session. Defaults to localhost, but you can specify
   the server's address by adding it as an argument (`:CespJoin 123.123.123.123`)
 - `:CespLeave`: Leave the session.
-- `:CespExplore`: List all of the host's files. If you have the Telescope plugin
-  installed this will be much nicer.
+- `:CespExplore`: List all of the host's files.
