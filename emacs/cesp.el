@@ -46,7 +46,7 @@ you are editing with them"
 This is the process object that represents
 the connection to the tcp server")
 
-(defvar cesp-cursors
+(defvar cesp--cursors
   nil
   "An alist of other peoples cursors.
 There are two overlays, one for the cursor
@@ -442,33 +442,35 @@ and position is highlighted."
 							 (forward-line (car position))
 							 (end-of-line)
 							 (point))))
-			   (overlay-pair (or (cdr (assoc id cesp-cursors))
+			   (overlay-pair (or (cdr (assoc id cesp--cursors))
 								 (let ((c-o (make-overlay pos pos2 buf))
 									   (n-o (make-overlay line-end (1- line-end) buf)))
 								   (overlay-put c-o 'face 'cursor)
 								   ;; This took over 3 hours
 								   (overlay-put n-o 'after-string (concat " " (propertize (concat " " name) 'face 'cursor)))
-								   (setq cesp-cursors (cons `(,id . (,c-o ,n-o)) cesp-cursors))
+								   (setq cesp--cursors (cons `(,id . (,c-o ,n-o)) cesp--cursors))
 								   `(,c-o ,n-o)))))
 		  ;; Update values
 		  (move-overlay (car overlay-pair) pos pos2 buf)
-		  (move-overlay (car (cdr overlay-pair)) line-end (1- line-end) buf)))))
+		  (move-overlay (car (cdr overlay-pair)) line-end (1- line-end) buf))
+	  ;; Hide cursor
+	  (cesp--delete-cursor id))))
 
 (defun cesp--delete-cursor(client_id)
   "Deletes cursor CLIENT_ID."
-  (dolist (o (cdr (assoc client_id cesp-cursors)))
+  (dolist (o (cdr (assoc client_id cesp--cursors)))
 	(delete-overlay o)
 	(delete-overlay o))
-  (setq cesp-cursors (map-delete cesp-cursors 1)))
+  (setq cesp--cursors (map-delete cesp--cursors 1)))
 
 (defun cesp--clear-cursors()
   "Deletes other peoples cursors.
 Mainly for debugging but also used when
 disconnected."
-	(dolist (o cesp-cursors)
+	(dolist (o cesp--cursors)
 	  (delete-overlay (car (cdr o)))
 	  (delete-overlay (car (cdr (cdr o)))))
-	(setq cesp-cursors nil))
+	(setq cesp--cursors nil))
 
 (defun cesp--update-content(path range lines)
   "Handler function which will apply change to buffer PATH.
