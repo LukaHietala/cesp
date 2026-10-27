@@ -215,11 +215,7 @@ START is inclusive, LAST is exclusive."
 		   (end (max beg (save-excursion
 						   (goto-char (point-min))
 						   (forward-line last)
-						   ;; 1- is for newline fix but if at end of file
-						   ;; it is not needed
-						   (if (= (point) (point-max))
-							   (point)
-							 (1- (point)))))))
+						   (1- (point))))))
 	  (buffer-substring-no-properties beg end))))
 
 (defun cesp--send-mouse()
