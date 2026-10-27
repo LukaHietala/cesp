@@ -1,3 +1,3 @@
-module cesp-server
+module github.com/lukahietala/cesp
 
 go 1.27
