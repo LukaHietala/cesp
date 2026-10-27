@@ -33,8 +33,6 @@ type Hub struct {
 	register chan *Client
 	// Unregister a new client
 	unregister chan *Client
-	// Signals hub to tear down
-	quit chan struct{}
 }
 
 func NewClient(conn net.Conn) *Client {
@@ -51,7 +49,6 @@ func NewHub() *Hub {
 		broadcast:  make(chan Message, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		quit:       make(chan struct{}),
 	}
 }
 
@@ -65,11 +62,6 @@ func (c *Client) SetName(name string) error {
 	}
 	c.name = name
 	return nil
-}
-
-// Cleanup all clients
-func (h *Hub) Close() {
-	close(h.quit)
 }
 
 func (h *Hub) Run() {
@@ -96,12 +88,6 @@ func (h *Hub) Run() {
 
 		case msg := <-h.broadcast:
 			h.broadcastEvent(msg.sender, msg.payload)
-
-		case <-h.quit:
-			for client := range h.clients {
-				h.removeClient(client)
-			}
-			return
 		}
 	}
 }

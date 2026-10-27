@@ -6,29 +6,26 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 type Server struct {
+	addr string
 	ln   net.Listener
-	quit chan struct{}
-	wg   sync.WaitGroup
 	// Holds all TCP connections
 	hub *Hub
 	// Holds buffers, and other non-tcp stuff
 	session *Session
 }
 
-func NewServer(root string, ignored []string) *Server {
+func NewServer(addr string, root string, ignored map[string]bool) *Server {
 	return &Server{
-		quit: make(chan struct{}),
+		addr: addr,
 		hub:  NewHub(),
 		session: &Session{
 			fsys:    os.DirFS(root),
@@ -38,40 +35,25 @@ func NewServer(root string, ignored []string) *Server {
 	}
 }
 
-func (s *Server) Start(addr string) {
-	ln, err := net.Listen("tcp", addr)
+func (s *Server) Start() {
+	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("failed to listen", "addr", s.addr, "error", err)
+		os.Exit(1)
 	}
-
-	go s.hub.Run()
-
 	s.ln = ln
 
-	s.wg.Add(1)
-	go s.serve()
-}
-
-func (s *Server) Stop() {
-	close(s.quit)
-	s.ln.Close()
-	s.hub.Close()
-	s.wg.Wait()
+	go s.hub.Run()
+	s.serve()
 }
 
 func (s *Server) serve() {
-	defer s.wg.Done()
-	log.Println("listening on", s.ln.Addr().String())
+	slog.Info("listening", "addr", s.ln.Addr().String())
 
 	for {
 		conn, err := s.ln.Accept()
 		if err != nil {
-			select {
-			case <-s.quit:
-				return
-			default:
-				log.Println("accept error", err)
-			}
+			slog.Error("accept error", "error", err)
 			continue
 		}
 
@@ -90,10 +72,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		s.hub.unregister <- client
 		conn.Close()
-		log.Println("connection closed", conn.RemoteAddr())
+		slog.Info("connection closed", "remote_addr", conn.RemoteAddr())
 	}()
 
-	log.Println("new connection", conn.RemoteAddr())
+	slog.Info("new connection", "remote_addr", conn.RemoteAddr())
 
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -110,7 +92,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				}
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := Encode(conn, msg); err != nil {
-					log.Printf("encode error to %s: %v\n", conn.RemoteAddr(), err)
+					slog.Error("encode error", "remote_addr", conn.RemoteAddr(), "error", err)
 					conn.Close()
 					cancel()
 					return
@@ -119,7 +101,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			case <-ticker.C:
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := Encode(conn, Event{Type: "ping"}); err != nil {
-					log.Printf("ping error to %s: %v\n", conn.RemoteAddr(), err)
+					slog.Error("ping error", "remote_addr", conn.RemoteAddr(), "error", err)
 					conn.Close()
 					cancel()
 					return
@@ -138,16 +120,21 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			if err != io.EOF {
-				log.Printf("decode error from %s: %v\n", conn.RemoteAddr(), err)
+				slog.Error("decode error", "remote_addr", conn.RemoteAddr(), "error", err)
 			}
 			break
 		}
 
-		log.Println("received event:", ev.Type)
+		slog.Debug("received event",
+			slog.Group("event",
+				slog.String("type", ev.Type),
+				slog.Any("payload", ev.Payload),
+			),
+		)
 
 		err = s.handleEvent(ev, client)
 		if err != nil {
-			log.Printf("event error %s: %v\n", ev.Type, err)
+			slog.Error("event error", "type", ev.Type, "error", err)
 
 			errorEv := Event{
 				Type: "server:error",
@@ -229,9 +216,9 @@ func (s *Server) handleEvent(ev Event, client *Client) error {
 
 		b := s.session.FindBufferByPath(p.Path)
 		if err := b.Save(s.session.root); err != nil {
-			log.Printf("error saving %s: %v\n", p.Path, err)
+			slog.Error("error saving file", "path", p.Path, "error", err)
 		} else {
-			log.Printf("saved %s\n", p.Path)
+			slog.Info("saved file", "path", p.Path)
 		}
 
 	case "auth:handshake":
@@ -306,21 +293,21 @@ func (s *Server) handleEvent(ev Event, client *Client) error {
 	return nil
 }
 
-func getFiles(fsys fs.FS, ignored []string) ([]string, error) {
+func getFiles(fsys fs.FS, ignored map[string]bool) ([]string, error) {
 	var paths []string
 
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if slices.Contains(ignored, d.Name()) {
+		if ignored[d.Name()] {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
 
-		if slices.Contains(ignored, path) {
+		if d.IsDir() {
 			return nil
 		}
 

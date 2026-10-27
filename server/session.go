@@ -10,7 +10,7 @@ type Session struct {
 	buffers sync.Map
 	fsys    fs.FS
 	root    string
-	ignored []string
+	ignored map[string]bool
 }
 
 // FindBufferByPath returns an existing buffer for the path, or creates a new one
