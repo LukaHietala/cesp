@@ -215,7 +215,9 @@ START is inclusive, LAST is exclusive."
 		   (end (max beg (save-excursion
 						   (goto-char (point-min))
 						   (forward-line last)
-						   (1- (point))))))
+						   (if (eq (char-before (point)) 10)
+							   (1- (point))
+							 (point))))))
 	  (buffer-substring-no-properties beg end))))
 
 (defun cesp--send-mouse()
